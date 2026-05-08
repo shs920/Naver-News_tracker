@@ -21,48 +21,153 @@ def search_naver_news(keyword: str, settings: Settings) -> list[SearchResult]:
         "https://search.naver.com/search.naver"
         f"?where=news&query={quote_plus(keyword)}&sort=1"
     )
-    headers = {"User-Agent": settings.user_agent}
 
-    with httpx.Client(timeout=settings.request_timeout, follow_redirects=True, headers=headers) as client:
+    headers = {
+        "User-Agent": settings.user_agent,
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Referer": "https://www.naver.com/",
+    }
+
+    with httpx.Client(
+        timeout=settings.request_timeout,
+        follow_redirects=True,
+        headers=headers
+    ) as client:
         response = client.get(search_url)
         response.raise_for_status()
 
     soup = BeautifulSoup(response.text, "html.parser")
+
     results: list[SearchResult] = []
     seen: set[str] = set()
 
-    for item in soup.select("div.news_wrap, li.bx"):
-        link = item.select_one("a.news_tit")
-        if not link:
-            continue
+    # 1차: 기존 네이버 뉴스 검색 구조
+    selectors = [
+        "a.news_tit",
+        "a[href*='n.news.naver.com']",
+        "a[href*='news.naver.com']",
+        "a[href^='https://']",
+    ]
 
+    links = []
+
+    for selector in selectors:
+        found = soup.select(selector)
+        if found:
+            links.extend(found)
+
+    for link in links:
         raw_url = link.get("href")
         if not raw_url:
             continue
 
         url = unwrap_naver_redirect(raw_url)
+
+        if not is_probable_news_url(url):
+            continue
+
         if url in seen:
             continue
+
+        title = link.get("title") or link.get_text(" ", strip=True)
+
+        if not title or len(title.strip()) < 5:
+            continue
+
         seen.add(url)
 
-        press_node = item.select_one("a.info.press, span.info.press")
-        press = press_node.get_text(" ", strip=True).replace("언론사 선정", "").strip() if press_node else None
-        title = link.get("title") or link.get_text(" ", strip=True)
-        results.append(SearchResult(url=url, title=title, press=press))
+        parent = link.find_parent()
+        press = extract_press(parent)
+
+        results.append(
+            SearchResult(
+                url=url,
+                title=title.strip(),
+                press=press
+            )
+        )
 
         if len(results) >= settings.max_results_per_keyword:
             break
+
+    print(f"{keyword}: {len(results)} search results")
+
+    if len(results) == 0:
+        print("[검색 결과 0개] 네이버 HTML 구조 또는 접근 제한 가능성 있음")
+        print("검색 URL:", search_url)
+        print("응답 길이:", len(response.text))
+        page_title = soup.title.get_text(strip=True) if soup.title else "title 없음"
+        print("페이지 title:", page_title)
 
     return results
 
 
 def unwrap_naver_redirect(url: str) -> str:
     parsed = urlparse(url)
+
     if "naver.com" not in parsed.netloc:
         return url
 
     query = parse_qs(parsed.query)
+
     for key in ("url", "u"):
         if query.get(key):
             return query[key][0]
+
     return url
+
+
+def is_probable_news_url(url: str) -> bool:
+    parsed = urlparse(url)
+    netloc = parsed.netloc.lower()
+
+    if not url.startswith("http"):
+        return False
+
+    blocked_domains = [
+        "search.naver.com",
+        "kin.naver.com",
+        "blog.naver.com",
+        "cafe.naver.com",
+        "shopping.naver.com",
+        "adcr.naver.com",
+        "nid.naver.com",
+        "help.naver.com",
+    ]
+
+    for blocked in blocked_domains:
+        if blocked in netloc:
+            return False
+
+    # 네이버 인링크 뉴스
+    if "news.naver.com" in netloc or "n.news.naver.com" in netloc:
+        return True
+
+    # 외부 언론사 기사 후보
+    # 너무 넓게 잡되, 검색/블로그/광고성 링크는 위에서 제외
+    return True
+
+
+def extract_press(parent) -> str | None:
+    if not parent:
+        return None
+
+    press_selectors = [
+        "a.info.press",
+        "span.info.press",
+        ".press",
+        ".info_group",
+        ".news_info",
+    ]
+
+    for selector in press_selectors:
+        node = parent.select_one(selector)
+        if node:
+            text = node.get_text(" ", strip=True)
+            text = text.replace("언론사 선정", "").strip()
+
+            if text:
+                return text
+
+    return None
