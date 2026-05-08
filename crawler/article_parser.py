@@ -74,7 +74,7 @@ def fetch_article(url: str, fallback_press: str | None, settings: Settings) -> P
             content=None,
             content_plain=None,
             image_urls=[],
-            is_deleted=True,
+            is_deleted=False,
             status_code=None,
         )
 
@@ -184,10 +184,6 @@ def extract_content_html(soup: BeautifulSoup, html: str) -> str | None:
     except Exception:
         pass
 
-    body = soup.body
-    if body:
-        remove_noise(body)
-        return str(body)
     return None
 
 
