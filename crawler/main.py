@@ -51,6 +51,13 @@ def comparable_previous(version: dict[str, Any], article: dict[str, Any]) -> dic
 
 def process_result(db: NewsTrackerDB, keyword: str, url: str, press: str | None, settings) -> str:
     parsed = fetch_article(url, press, settings)
+    if not parsed.is_deleted and (
+        not parsed.title
+        or not parsed.content_plain
+        or len(parsed.content_plain.strip()) < 120
+    ):
+        print(f"Skipped low-quality article parse: url={url}")
+        return parsed.normalized_url
     image_hashes = [] if parsed.is_deleted else compute_image_hashes(parsed.image_urls, settings)
     existing = db.get_article_by_normalized_url(parsed.normalized_url)
     now = utc_now_iso()
