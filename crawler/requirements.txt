@@ -6,3 +6,4 @@ pillow==10.4.0
 python-dotenv==1.0.1
 readability-lxml==0.8.1
 supabase==2.7.4
+lxml_html_clean==0.4.2
