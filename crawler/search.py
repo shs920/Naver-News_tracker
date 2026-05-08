@@ -121,12 +121,14 @@ def unwrap_naver_redirect(url: str) -> str:
 def is_probable_news_url(url: str) -> bool:
     parsed = urlparse(url)
     netloc = parsed.netloc.lower()
+    path = parsed.path.lower()
 
     if not url.startswith("http"):
         return False
 
     blocked_domains = [
         "search.naver.com",
+        "www.naver.com",
         "kin.naver.com",
         "blog.naver.com",
         "cafe.naver.com",
@@ -140,13 +142,52 @@ def is_probable_news_url(url: str) -> bool:
         if blocked in netloc:
             return False
 
-    # 네이버 인링크 뉴스
-    if "news.naver.com" in netloc or "n.news.naver.com" in netloc:
+    # 네이버 인링크 기사만 확실히 허용
+    if "n.news.naver.com" in netloc:
         return True
 
-    # 외부 언론사 기사 후보
-    # 너무 넓게 잡되, 검색/블로그/광고성 링크는 위에서 제외
-    return True
+    if "news.naver.com" in netloc and (
+        "/article/" in path or "/mnews/article/" in path
+    ):
+        return True
+
+    # 외부 언론사 메인/섹션/홈페이지는 우선 제외
+    homepage_like_paths = [
+        "",
+        "/",
+        "/news",
+        "/main",
+        "/home",
+        "/index",
+        "/index.html",
+        "/article",
+        "/articles",
+    ]
+
+    if path in homepage_like_paths:
+        return False
+
+    # 외부 언론사 기사 후보만 허용
+    article_patterns = [
+        "/news/",
+        "/article/",
+        "/articles/",
+        "/view/",
+        "/read/",
+        "/detail/",
+        "/newsview/",
+        "/news_view/",
+    ]
+
+    if any(pattern in path for pattern in article_patterns):
+        return True
+
+    # 숫자 ID가 긴 URL은 기사일 가능성이 있음
+    digits = "".join(ch for ch in path if ch.isdigit())
+    if len(digits) >= 6:
+        return True
+
+    return False
 
 
 def extract_press(parent) -> str | None:
