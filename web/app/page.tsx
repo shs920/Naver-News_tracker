@@ -61,7 +61,7 @@ export default async function HomePage() {
     throw new Error(error.message);
   }
 
-  const changes = await attachVersionTitles((data || []) as Change[]);
+  const changes = await attachVersionTitles((data || []) as unknown as Change[]);
 
   return (
     <main className="page">
