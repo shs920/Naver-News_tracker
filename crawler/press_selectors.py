@@ -113,5 +113,7 @@ NOISE_SELECTORS: list[str] = [
     "button", "form",
 ]
 
-# 최소 본문 길이 (이하면 파싱 실패로 간주)
-MIN_CONTENT_LENGTH = 300
+# 최소 본문 길이.
+# 광고·메인 페이지 등 완전히 빈 페이지만 걸러냄.
+# 실제 짧은 기사(속보 등)는 저장 대상이므로 매우 낮게 설정.
+MIN_CONTENT_LENGTH = 10
