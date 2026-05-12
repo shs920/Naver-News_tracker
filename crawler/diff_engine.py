@@ -1,3 +1,7 @@
+"""
+변경 감지 엔진.
+title/body similarity 비교 + image pHash 비교.
+"""
 from __future__ import annotations
 
 import hashlib
@@ -12,31 +16,28 @@ def stable_hash(value: str | None) -> str | None:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
-def normalize_title(title: str | None) -> str:
-    return normalize_meaningful_text(title)
-
-
-def normalize_body(content: str | None) -> str:
-    return normalize_meaningful_text(content)
-
-
 def normalize_meaningful_text(value: str | None) -> str:
+    """비교용 텍스트 정규화: 소문자, 공백/기호 제거."""
     if not value:
         return ""
     value = value.lower()
-    value = re.sub(r"[\s\"'“”‘’.,!?;:()\[\]{}<>·ㆍ…]+", "", value)
+    value = re.sub(r'[\s\"\'""\u2018\u2019.,!?;:()\[\]{}<>\u00b7\u318d\u2026]+', "", value)
     return value.strip()
 
 
 def change_ratio(before: str | None, after: str | None) -> float:
     before_norm = normalize_meaningful_text(before)
-    after_norm = normalize_meaningful_text(after)
+    after_norm  = normalize_meaningful_text(after)
     if not before_norm and not after_norm:
         return 0.0
     return 1.0 - SequenceMatcher(None, before_norm, after_norm).ratio()
 
 
-def image_change_ratio(before_hashes: list[str], after_hashes: list[str], threshold: int) -> float:
+def image_change_ratio(
+    before_hashes: list[str],
+    after_hashes: list[str],
+    threshold: int,
+) -> float:
     if not before_hashes and not after_hashes:
         return 0.0
     if not before_hashes or not after_hashes:
@@ -74,28 +75,28 @@ def detect_change(
     image_hamming_threshold: int,
 ) -> dict[str, Any]:
     title_ratio = change_ratio(previous.get("title"), current.get("title"))
-    body_ratio = change_ratio(previous.get("content_plain"), current.get("content_plain"))
+    body_ratio  = change_ratio(previous.get("content_plain"), current.get("content_plain"))
     image_ratio = image_change_ratio(
         previous.get("image_hashes") or [],
         current.get("image_hashes") or [],
         image_hamming_threshold,
     )
 
-    title_changed = title_ratio >= title_threshold
-    body_changed = body_ratio >= body_threshold
-    image_changed = image_ratio >= image_threshold
+    title_changed   = title_ratio  >= title_threshold
+    body_changed    = body_ratio   >= body_threshold
+    image_changed   = image_ratio  >= image_threshold
     deleted_changed = bool(previous.get("is_deleted", False)) != bool(current.get("is_deleted", False))
 
     score = max(title_ratio, body_ratio, image_ratio, 1.0 if deleted_changed else 0.0)
 
     return {
-        "title_changed": title_changed,
-        "body_changed": body_changed,
-        "image_changed": image_changed,
-        "deleted_changed": deleted_changed,
-        "change_score": round(score, 5),
+        "title_changed":    title_changed,
+        "body_changed":     body_changed,
+        "image_changed":    image_changed,
+        "deleted_changed":  deleted_changed,
+        "change_score":     round(score, 5),
         "title_change_ratio": round(title_ratio, 5),
-        "body_change_ratio": round(body_ratio, 5),
+        "body_change_ratio":  round(body_ratio, 5),
         "image_change_ratio": round(image_ratio, 5),
         "has_meaningful_change": title_changed or body_changed or image_changed or deleted_changed,
     }
