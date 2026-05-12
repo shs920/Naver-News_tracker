@@ -19,7 +19,7 @@ class NewsTrackerDB:
             .order("keyword")
             .execute()
         )
-        return sorted({row["keyword"] for row in (result.data or [])})
+        return [row["keyword"] for row in (result.data or [])]
 
     def get_article_by_normalized_url(self, normalized_url: str) -> dict[str, Any] | None:
         result = (
@@ -46,6 +46,7 @@ class NewsTrackerDB:
         result = (
             self.client.table("articles")
             .select("id,url,normalized_url,press,last_keyword,last_seen_at")
+            .eq("is_deleted", False)
             .order("last_seen_at")
             .limit(limit)
             .execute()
