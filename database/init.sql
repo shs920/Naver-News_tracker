@@ -50,40 +50,34 @@ create table if not exists public.article_changes (
   body_changed boolean not null default false,
   image_changed boolean not null default false,
   deleted_changed boolean not null default false,
-  change_score numeric(8, 5) not null default 0,
-  title_change_ratio numeric(8, 5) not null default 0,
-  body_change_ratio numeric(8, 5) not null default 0,
-  image_change_ratio numeric(8, 5) not null default 0,
+  change_score numeric(8,5) not null default 0,
+  title_change_ratio numeric(8,5) not null default 0,
+  body_change_ratio numeric(8,5) not null default 0,
+  image_change_ratio numeric(8,5) not null default 0,
   changed_at timestamptz not null default now(),
   created_at timestamptz not null default now(),
   unique (article_id, from_version, to_version)
 );
 
+-- 인덱스
 create index if not exists idx_keywords_active
   on public.keywords (is_active, keyword);
-
 create index if not exists idx_articles_last_seen
   on public.articles (last_seen_at desc);
-
 create index if not exists idx_articles_deleted
   on public.articles (is_deleted, deleted_at desc);
-
 create index if not exists idx_article_versions_article_version
   on public.article_versions (article_id, version desc);
-
 create index if not exists idx_article_versions_fetched_at
   on public.article_versions (fetched_at desc);
-
 create index if not exists idx_article_changes_changed_at
   on public.article_changes (changed_at desc);
-
 create index if not exists idx_article_changes_article
   on public.article_changes (article_id, to_version desc);
 
+-- updated_at 자동 갱신
 create or replace function public.set_updated_at()
-returns trigger
-language plpgsql
-as $$
+returns trigger language plpgsql as $$
 begin
   new.updated_at = now();
   return new;
@@ -100,34 +94,31 @@ create trigger set_articles_updated_at
 before update on public.articles
 for each row execute function public.set_updated_at();
 
+-- RLS
 alter table public.keywords enable row level security;
 alter table public.articles enable row level security;
 alter table public.article_versions enable row level security;
 alter table public.article_changes enable row level security;
 
 drop policy if exists "Public read keywords" on public.keywords;
-create policy "Public read keywords"
-on public.keywords for select
-using (true);
+create policy "Public read keywords" on public.keywords for select using (true);
 
 drop policy if exists "Public read articles" on public.articles;
-create policy "Public read articles"
-on public.articles for select
-using (true);
+create policy "Public read articles" on public.articles for select using (true);
 
 drop policy if exists "Public read article versions" on public.article_versions;
-create policy "Public read article versions"
-on public.article_versions for select
-using (true);
+create policy "Public read article versions" on public.article_versions for select using (true);
 
 drop policy if exists "Public read article changes" on public.article_changes;
-create policy "Public read article changes"
-on public.article_changes for select
-using (true);
+create policy "Public read article changes" on public.article_changes for select using (true);
 
-insert into public.keywords (keyword)
-values
-  ('빙그레'),
-  ('삼양식품'),
-  ('농심')
+-- 초기 키워드
+insert into public.keywords (keyword) values
+  ('빙그레'), ('삼양식품'), ('농심'),
+  ('CJ제일제당'), ('오뚜기'), ('오리온'),
+  ('롯데웰푸드'), ('롯데칠성'), ('대상'),
+  ('풀무원'), ('동원F&B'), ('매일유업'),
+  ('남양유업'), ('서울우유'), ('하림'),
+  ('해태'), ('hy'), ('하이트진로'),
+  ('오비맥주'), ('BBQ'), ('BHC'), ('교촌')
 on conflict (keyword) do nothing;
