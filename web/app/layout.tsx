@@ -1,26 +1,14 @@
 import type { Metadata } from "next";
-import type { ReactNode } from "react";
-import Link from "next/link";
-import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "News Tracker",
-  description: "Track article revisions by title, body, image, and deletion state."
+  title: "식품 기업 뉴스 추적기",
+  description: "식품 기업 관련 뉴스 기사의 제목·본문·사진 수정을 추적합니다",
 };
 
-export default function RootLayout({
-  children
-}: Readonly<{
-  children: ReactNode;
-}>) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="ko">
-      <body>
-        <header className="topbar">
-          <Link href="/" className="brand">
-            News Tracker
-          </Link>
-        </header>
+      <body style={{ margin: 0, fontFamily: "system-ui, sans-serif", background: "#f5f5f5" }}>
         {children}
       </body>
     </html>
