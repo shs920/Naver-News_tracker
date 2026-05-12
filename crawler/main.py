@@ -1,3 +1,11 @@
+"""
+네이버 뉴스 기사 수정 추적기 - 메인 실행 파일.
+
+개선사항:
+- relevance filtering: 기업과 무관한 기사 skip
+- low_quality skip: 본문 짧은 기사 저장 안 함
+- 로그 강화: RELEVANT / SKIP-RELEVANCE / SKIP-QUALITY 출력
+"""
 from __future__ import annotations
 
 from datetime import datetime, timezone
@@ -8,6 +16,7 @@ from config import get_settings
 from db import NewsTrackerDB
 from diff_engine import detect_change, stable_hash
 from image_hash import compute_image_hashes
+from relevance import filter_by_relevance
 from search import search_naver_news
 
 
@@ -15,7 +24,13 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def version_payload(article_id: str, version: int, keyword: str, parsed: ParsedArticle, image_hashes: list[str]) -> dict[str, Any]:
+def version_payload(
+    article_id: str,
+    version: int,
+    keyword: str,
+    parsed: ParsedArticle,
+    image_hashes: list[str],
+) -> dict[str, Any]:
     return {
         "article_id": article_id,
         "version": version,
@@ -49,51 +64,84 @@ def comparable_previous(version: dict[str, Any], article: dict[str, Any]) -> dic
     }
 
 
-def process_result(db: NewsTrackerDB, keyword: str, url: str, press: str | None, settings) -> str:
+def process_result(
+    db: NewsTrackerDB,
+    keyword: str,
+    url: str,
+    press: str | None,
+    search_title: str | None,
+    settings,
+) -> str | None:
+    """
+    기사 1개 처리. 저장 완료 시 normalized_url 반환, skip 시 None 반환.
+    """
     parsed = fetch_article(url, press, settings)
-    if not parsed.is_deleted and (
-        not parsed.title
-        or not parsed.content_plain
-        or len(parsed.content_plain.strip()) < 120
-    ):
-        print(f"Skipped low-quality article parse: url={url}")
-        return parsed.normalized_url
-    image_hashes = [] if parsed.is_deleted else compute_image_hashes(parsed.image_urls, settings)
-    existing = db.get_article_by_normalized_url(parsed.normalized_url)
-    now = utc_now_iso()
 
-    if not existing:
-        article = db.create_article(
-            {
-                "url": parsed.url,
-                "normalized_url": parsed.normalized_url,
-                "press": parsed.press,
-                "source_type": "naver_news_search",
-                "first_seen_at": now,
+    # ── 1. 삭제 기사 처리 ──────────────────────────────────
+    if parsed.is_deleted:
+        existing = db.get_article_by_normalized_url(parsed.normalized_url)
+        if existing and not existing.get("is_deleted"):
+            now = utc_now_iso()
+            db.update_article(existing["id"], {
+                "is_deleted": True,
+                "deleted_at": now,
                 "last_seen_at": now,
-                "current_version": 1,
-                "is_deleted": parsed.is_deleted,
-                "deleted_at": now if parsed.is_deleted else None,
-                "last_keyword": keyword,
-            }
-        )
-        db.create_version(version_payload(article["id"], 1, keyword, parsed, image_hashes))
+            })
+            print(f"  [DELETED] {url}")
         return parsed.normalized_url
 
+    # ── 2. 본문 품질 체크 ──────────────────────────────────
+    # parse_quality="failed"는 URL 자체가 기사가 아닌 경우(메인/섹션 페이지 등)
+    # low_quality(짧은 본문)는 실제 짧은 기사일 수 있으므로 저장 진행
+    if parsed.parse_quality == "failed":
+        print(f"  [SKIP-QUALITY] 파싱 실패: {url}")
+        return None
+
+    # ── 3. Relevance filtering ─────────────────────────────
+    # 검색 제목(빠름) + 파싱 제목/본문(정확) 모두 활용
+    effective_title = parsed.title or search_title
+    if not filter_by_relevance(keyword, effective_title, parsed.content_plain):
+        return None
+
+    # ── 4. 이미지 해시 계산 ────────────────────────────────
+    image_hashes = compute_image_hashes(parsed.image_urls, settings)
+
+    now = utc_now_iso()
+    existing = db.get_article_by_normalized_url(parsed.normalized_url)
+
+    # ── 5. 신규 기사 저장 ──────────────────────────────────
+    if not existing:
+        article = db.create_article({
+            "url": parsed.url,
+            "normalized_url": parsed.normalized_url,
+            "press": parsed.press,
+            "source_type": "naver_news_search",
+            "first_seen_at": now,
+            "last_seen_at": now,
+            "current_version": 1,
+            "is_deleted": False,
+            "deleted_at": None,
+            "last_keyword": keyword,
+        })
+        db.create_version(version_payload(article["id"], 1, keyword, parsed, image_hashes))
+        print(f"  [NEW] v1 저장: {effective_title[:40]}")
+        return parsed.normalized_url
+
+    # ── 6. 기존 기사 변경 감지 ────────────────────────────
     latest = db.get_latest_version(existing["id"])
     if not latest:
-        db.create_version(version_payload(existing["id"], existing.get("current_version", 1), keyword, parsed, image_hashes))
-        db.update_article(
-            existing["id"],
-            {
-                "url": parsed.url,
-                "press": parsed.press or existing.get("press"),
-                "last_seen_at": now,
-                "last_keyword": keyword,
-                "is_deleted": parsed.is_deleted,
-                "deleted_at": now if parsed.is_deleted else None,
-            },
+        db.create_version(
+            version_payload(existing["id"], existing.get("current_version", 1),
+                            keyword, parsed, image_hashes)
         )
+        db.update_article(existing["id"], {
+            "url": parsed.url,
+            "press": parsed.press or existing.get("press"),
+            "last_seen_at": now,
+            "last_keyword": keyword,
+            "is_deleted": False,
+            "deleted_at": None,
+        })
         return parsed.normalized_url
 
     change = detect_change(
@@ -105,38 +153,42 @@ def process_result(db: NewsTrackerDB, keyword: str, url: str, press: str | None,
         image_hamming_threshold=settings.image_hamming_threshold,
     )
 
-    next_values = {
+    next_values: dict[str, Any] = {
         "url": parsed.url,
         "press": parsed.press or existing.get("press"),
         "last_seen_at": now,
         "last_keyword": keyword,
-        "is_deleted": parsed.is_deleted,
-        "deleted_at": now if parsed.is_deleted and not existing.get("is_deleted") else existing.get("deleted_at"),
+        "is_deleted": False,
+        "deleted_at": None,
     }
 
     if change["has_meaningful_change"]:
         next_version = int(existing["current_version"]) + 1
-        db.create_version(version_payload(existing["id"], next_version, keyword, parsed, image_hashes))
-        db.create_change(
-            {
-                "article_id": existing["id"],
-                "from_version": existing["current_version"],
-                "to_version": next_version,
-                "title_changed": change["title_changed"],
-                "body_changed": change["body_changed"],
-                "image_changed": change["image_changed"],
-                "deleted_changed": change["deleted_changed"],
-                "change_score": change["change_score"],
-                "title_change_ratio": change["title_change_ratio"],
-                "body_change_ratio": change["body_change_ratio"],
-                "image_change_ratio": change["image_change_ratio"],
-                "changed_at": now,
-            }
+        db.create_version(
+            version_payload(existing["id"], next_version, keyword, parsed, image_hashes)
         )
+        db.create_change({
+            "article_id": existing["id"],
+            "from_version": existing["current_version"],
+            "to_version": next_version,
+            "title_changed": change["title_changed"],
+            "body_changed": change["body_changed"],
+            "image_changed": change["image_changed"],
+            "deleted_changed": change["deleted_changed"],
+            "change_score": change["change_score"],
+            "title_change_ratio": change["title_change_ratio"],
+            "body_change_ratio": change["body_change_ratio"],
+            "image_change_ratio": change["image_change_ratio"],
+            "changed_at": now,
+        })
         next_values["current_version"] = next_version
-
-    if not parsed.is_deleted:
-        next_values["deleted_at"] = None
+        changed_types = []
+        if change["title_changed"]: changed_types.append("제목")
+        if change["body_changed"]:  changed_types.append("본문")
+        if change["image_changed"]: changed_types.append("사진")
+        print(f"  [CHANGED] v{next_version} [{','.join(changed_types)}]: {effective_title[:40]}")
+    else:
+        print(f"  [NO-CHANGE] score={change['change_score']:.4f}: {effective_title[:40]}")
 
     db.update_article(existing["id"], next_values)
     return parsed.normalized_url
@@ -151,19 +203,33 @@ def main() -> None:
         print("No active keywords found.")
         return
 
-    total = 0
+    print(f"키워드 {len(keywords)}개 처리 시작: {', '.join(keywords)}")
+
+    total_new = 0
+    total_changed = 0
+    total_skipped = 0
     processed_urls: set[str] = set()
+
     for keyword in keywords:
         results = search_naver_news(keyword, settings)
-        print(f"{keyword}: {len(results)} search results")
+        print(f"\n[{keyword}] 검색 결과: {len(results)}개")
+
         for result in results:
             try:
-                normalized_url = process_result(db, keyword, result.url, result.press, settings)
-                processed_urls.add(normalized_url)
-                total += 1
+                normalized_url = process_result(
+                    db, keyword, result.url, result.press, result.title, settings
+                )
+                if normalized_url:
+                    if normalized_url not in processed_urls:
+                        total_new += 1
+                    processed_urls.add(normalized_url)
+                else:
+                    total_skipped += 1
             except Exception as exc:
-                print(f"Failed: keyword={keyword} url={result.url} error={exc}")
+                print(f"  [ERROR] {result.url}: {exc}")
 
+    # ── Recheck: 기존 추적 기사 재확인 ─────────────────────
+    print(f"\n[RECHECK] 기존 기사 재확인 (최대 {settings.max_recheck_articles}개)")
     rechecked = 0
     for article in db.list_articles_for_recheck(settings.max_recheck_articles):
         if article["normalized_url"] in processed_urls:
@@ -174,14 +240,19 @@ def main() -> None:
                 article.get("last_keyword") or "recheck",
                 article["url"],
                 article.get("press"),
+                None,
                 settings,
             )
-            processed_urls.add(normalized_url)
+            if normalized_url:
+                processed_urls.add(normalized_url)
             rechecked += 1
         except Exception as exc:
-            print(f"Recheck failed: article_id={article['id']} url={article['url']} error={exc}")
+            print(f"  [RECHECK ERROR] {article['url']}: {exc}")
 
-    print(f"Processed {total} article candidates and rechecked {rechecked} tracked articles.")
+    print(
+        f"\n완료: 처리={total_new}, skip={total_skipped}, "
+        f"recheck={rechecked}, 총={len(processed_urls)}"
+    )
 
 
 if __name__ == "__main__":
