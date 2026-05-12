@@ -1,3 +1,7 @@
+"""
+네이버 뉴스 검색 모듈.
+개선: 페이지네이션으로 최대 max_search_pages 페이지까지 수집.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -17,198 +21,79 @@ class SearchResult:
 
 
 def search_naver_news(keyword: str, settings: Settings) -> list[SearchResult]:
-    search_url = (
-        "https://search.naver.com/search.naver"
-        f"?where=news&query={quote_plus(keyword)}&sort=1"
-    )
-
-    headers = {
-        "User-Agent": settings.user_agent,
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-        "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Referer": "https://www.naver.com/",
-    }
+    headers = {"User-Agent": settings.user_agent}
+    results: list[SearchResult] = []
+    seen: set[str] = set()
+    page_size = 10  # 네이버 검색 결과 기본 페이지당 10개
 
     with httpx.Client(
         timeout=settings.request_timeout,
         follow_redirects=True,
-        headers=headers
+        headers=headers,
     ) as client:
-        response = client.get(search_url)
-        response.raise_for_status()
-
-    soup = BeautifulSoup(response.text, "html.parser")
-
-    results: list[SearchResult] = []
-    seen: set[str] = set()
-
-    # 1차: 기존 네이버 뉴스 검색 구조
-    selectors = [
-        "a.news_tit",
-        "a[href*='n.news.naver.com']",
-        "a[href*='news.naver.com']",
-        "a[href^='https://']",
-    ]
-
-    links = []
-
-    for selector in selectors:
-        found = soup.select(selector)
-        if found:
-            links.extend(found)
-
-    for link in links:
-        raw_url = link.get("href")
-        if not raw_url:
-            continue
-
-        url = unwrap_naver_redirect(raw_url)
-
-        if not is_probable_news_url(url):
-            continue
-
-        if url in seen:
-            continue
-
-        title = link.get("title") or link.get_text(" ", strip=True)
-
-        if not title or len(title.strip()) < 5:
-            continue
-
-        seen.add(url)
-
-        parent = link.find_parent()
-        press = extract_press(parent)
-
-        results.append(
-            SearchResult(
-                url=url,
-                title=title.strip(),
-                press=press
+        for page in range(settings.max_search_pages):
+            start = page * page_size + 1
+            search_url = (
+                "https://search.naver.com/search.naver"
+                f"?where=news&query={quote_plus(keyword)}&sort=1&start={start}"
             )
-        )
+            try:
+                response = client.get(search_url)
+                response.raise_for_status()
+            except httpx.HTTPError as exc:
+                print(f"  [SEARCH ERROR] {keyword} page={page+1}: {exc}")
+                break
 
-        if len(results) >= settings.max_results_per_keyword:
-            break
+            soup = BeautifulSoup(response.text, "html.parser")
+            page_results = _parse_search_page(soup, seen, settings.max_results_per_keyword - len(results))
 
-    print(f"{keyword}: {len(results)} search results")
-
-    if len(results) == 0:
-        print("[검색 결과 0개] 네이버 HTML 구조 또는 접근 제한 가능성 있음")
-        print("검색 URL:", search_url)
-        print("응답 길이:", len(response.text))
-        page_title = soup.title.get_text(strip=True) if soup.title else "title 없음"
-        print("페이지 title:", page_title)
+            results.extend(page_results)
+            if len(results) >= settings.max_results_per_keyword:
+                break
+            if not page_results:
+                break  # 더 이상 결과 없음
 
     return results
 
 
-def unwrap_naver_redirect(url: str) -> str:
-    parsed = urlparse(url)
+def _parse_search_page(
+    soup: BeautifulSoup,
+    seen: set[str],
+    remaining: int,
+) -> list[SearchResult]:
+    results: list[SearchResult] = []
+    for item in soup.select("div.news_wrap, li.bx"):
+        if len(results) >= remaining:
+            break
+        link = item.select_one("a.news_tit")
+        if not link:
+            continue
+        raw_url = link.get("href")
+        if not raw_url:
+            continue
 
+        url = _unwrap_naver_redirect(raw_url)
+        if url in seen:
+            continue
+        seen.add(url)
+
+        press_node = item.select_one("a.info.press, span.info.press")
+        press = (
+            press_node.get_text(" ", strip=True).replace("언론사 선정", "").strip()
+            if press_node else None
+        )
+        title = link.get("title") or link.get_text(" ", strip=True)
+        results.append(SearchResult(url=url, title=title, press=press))
+
+    return results
+
+
+def _unwrap_naver_redirect(url: str) -> str:
+    parsed = urlparse(url)
     if "naver.com" not in parsed.netloc:
         return url
-
     query = parse_qs(parsed.query)
-
     for key in ("url", "u"):
         if query.get(key):
             return query[key][0]
-
     return url
-
-
-def is_probable_news_url(url: str) -> bool:
-    parsed = urlparse(url)
-    netloc = parsed.netloc.lower()
-    path = parsed.path.lower()
-
-    if not url.startswith("http"):
-        return False
-
-    blocked_domains = [
-        "search.naver.com",
-        "www.naver.com",
-        "kin.naver.com",
-        "blog.naver.com",
-        "cafe.naver.com",
-        "shopping.naver.com",
-        "adcr.naver.com",
-        "nid.naver.com",
-        "help.naver.com",
-    ]
-
-    for blocked in blocked_domains:
-        if blocked in netloc:
-            return False
-
-    # 네이버 인링크 기사만 확실히 허용
-    if "n.news.naver.com" in netloc:
-        return True
-
-    if "news.naver.com" in netloc and (
-        "/article/" in path or "/mnews/article/" in path
-    ):
-        return True
-
-    # 외부 언론사 메인/섹션/홈페이지는 우선 제외
-    homepage_like_paths = [
-        "",
-        "/",
-        "/news",
-        "/main",
-        "/home",
-        "/index",
-        "/index.html",
-        "/article",
-        "/articles",
-    ]
-
-    if path in homepage_like_paths:
-        return False
-
-    # 외부 언론사 기사 후보만 허용
-    article_patterns = [
-        "/news/",
-        "/article/",
-        "/articles/",
-        "/view/",
-        "/read/",
-        "/detail/",
-        "/newsview/",
-        "/news_view/",
-    ]
-
-    if any(pattern in path for pattern in article_patterns):
-        return True
-
-    # 숫자 ID가 긴 URL은 기사일 가능성이 있음
-    digits = "".join(ch for ch in path if ch.isdigit())
-    if len(digits) >= 6:
-        return True
-
-    return False
-
-
-def extract_press(parent) -> str | None:
-    if not parent:
-        return None
-
-    press_selectors = [
-        "a.info.press",
-        "span.info.press",
-        ".press",
-        ".info_group",
-        ".news_info",
-    ]
-
-    for selector in press_selectors:
-        node = parent.select_one(selector)
-        if node:
-            text = node.get_text(" ", strip=True)
-            text = text.replace("언론사 선정", "").strip()
-
-            if text:
-                return text
-
-    return None
