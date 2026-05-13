@@ -1,10 +1,10 @@
 """
-네이버 뉴스 기사 수정 추적기 - 메인 실행 파일.
+네이버 뉴스 기사 수정 추적기 - 메인.
 
 개선사항:
-- relevance filtering: 기업과 무관한 기사 skip
-- low_quality skip: 본문 짧은 기사 저장 안 함
-- 로그 강화: RELEVANT / SKIP-RELEVANCE / SKIP-QUALITY 출력
+  - recheck: last_seen_at 내림차순 → 최근 기사도 재확인
+  - article_changes unique 충돌 시 조용히 처리
+  - 로그: [NEW] / [CHANGED] / [NO-CHANGE] / [SKIP-*] 명확히 출력
 """
 from __future__ import annotations
 
@@ -46,24 +46,6 @@ def version_payload(
     }
 
 
-def comparable_current(parsed: ParsedArticle, image_hashes: list[str]) -> dict[str, Any]:
-    return {
-        "title": parsed.title,
-        "content_plain": parsed.content_plain,
-        "image_hashes": image_hashes,
-        "is_deleted": parsed.is_deleted,
-    }
-
-
-def comparable_previous(version: dict[str, Any], article: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "title": version.get("title"),
-        "content_plain": version.get("content_plain"),
-        "image_hashes": version.get("image_hashes") or [],
-        "is_deleted": article.get("is_deleted", False),
-    }
-
-
 def process_result(
     db: NewsTrackerDB,
     keyword: str,
@@ -72,12 +54,12 @@ def process_result(
     search_title: str | None,
     settings,
 ) -> str | None:
-    """
-    기사 1개 처리. 저장 완료 시 normalized_url 반환, skip 시 None 반환.
-    """
+    """기사 1개 처리. 정상 처리 시 normalized_url 반환."""
+
+    # ── 1. 파싱 ───────────────────────────────────────────────
     parsed = fetch_article(url, press, settings)
 
-    # ── 1. 삭제 기사 처리 ──────────────────────────────────
+    # ── 2. 삭제 기사 처리 ────────────────────────────────────
     if parsed.is_deleted:
         existing = db.get_article_by_normalized_url(parsed.normalized_url)
         if existing and not existing.get("is_deleted"):
@@ -90,63 +72,76 @@ def process_result(
             print(f"  [DELETED] {url}")
         return parsed.normalized_url
 
-    # ── 2. 본문 품질 체크 ──────────────────────────────────
-    # parse_quality="failed"는 URL 자체가 기사가 아닌 경우(메인/섹션 페이지 등)
-    # low_quality(짧은 본문)는 실제 짧은 기사일 수 있으므로 저장 진행
+    # ── 3. 파싱 실패 (메인/섹션 페이지 등) ──────────────────
     if parsed.parse_quality == "failed":
         print(f"  [SKIP-QUALITY] 파싱 실패: {url}")
         return None
 
-    # ── 3. Relevance filtering ─────────────────────────────
-    # 검색 제목(빠름) + 파싱 제목/본문(정확) 모두 활용
+    # ── 4. Relevance filtering ────────────────────────────────
     effective_title = parsed.title or search_title
     if not filter_by_relevance(keyword, effective_title, parsed.content_plain):
         return None
 
-    # ── 4. 이미지 해시 계산 ────────────────────────────────
+    # ── 5. 이미지 해시 계산 ──────────────────────────────────
     image_hashes = compute_image_hashes(parsed.image_urls, settings)
 
     now = utc_now_iso()
     existing = db.get_article_by_normalized_url(parsed.normalized_url)
 
-    # ── 5. 신규 기사 저장 ──────────────────────────────────
+    # ── 6. 신규 기사 저장 ────────────────────────────────────
     if not existing:
-        article = db.create_article({
-            "url": parsed.url,
-            "normalized_url": parsed.normalized_url,
-            "press": parsed.press,
-            "source_type": "naver_news_search",
-            "first_seen_at": now,
-            "last_seen_at": now,
-            "current_version": 1,
-            "is_deleted": False,
-            "deleted_at": None,
-            "last_keyword": keyword,
-        })
-        db.create_version(version_payload(article["id"], 1, keyword, parsed, image_hashes))
-        print(f"  [NEW] v1 저장: {effective_title[:40]}")
+        try:
+            article = db.create_article({
+                "url": parsed.url,
+                "normalized_url": parsed.normalized_url,
+                "press": parsed.press,
+                "source_type": "naver_news_api",
+                "first_seen_at": now,
+                "last_seen_at": now,
+                "current_version": 1,
+                "is_deleted": False,
+                "deleted_at": None,
+                "last_keyword": keyword,
+            })
+            db.create_version(version_payload(article["id"], 1, keyword, parsed, image_hashes))
+            print(f"  [NEW] v1 저장: {(effective_title or '')[:50]}")
+        except Exception as exc:
+            print(f"  [ERROR] 신규 저장 실패: {url} → {exc}")
         return parsed.normalized_url
 
-    # ── 6. 기존 기사 변경 감지 ────────────────────────────
+    # ── 7. 기존 기사 변경 감지 ───────────────────────────────
     latest = db.get_latest_version(existing["id"])
     if not latest:
-        db.create_version(
-            version_payload(existing["id"], existing.get("current_version", 1),
-                            keyword, parsed, image_hashes)
-        )
-        db.update_article(existing["id"], {
-            "url": parsed.url,
-            "press": parsed.press or existing.get("press"),
-            "last_seen_at": now,
-            "last_keyword": keyword,
-            "is_deleted": False,
-            "deleted_at": None,
-        })
+        # 버전 데이터 없으면 v1으로 저장
+        try:
+            db.create_version(
+                version_payload(existing["id"], 1, keyword, parsed, image_hashes)
+            )
+            db.update_article(existing["id"], {
+                "url": parsed.url,
+                "press": parsed.press or existing.get("press"),
+                "last_seen_at": now,
+                "last_keyword": keyword,
+                "is_deleted": False,
+                "deleted_at": None,
+            })
+        except Exception as exc:
+            print(f"  [ERROR] 버전 저장 실패: {url} → {exc}")
         return parsed.normalized_url
 
     change = detect_change(
-        comparable_previous(latest, existing),
-        comparable_current(parsed, image_hashes),
+        {
+            "title":         latest.get("title"),
+            "content_plain": latest.get("content_plain"),
+            "image_hashes":  latest.get("image_hashes") or [],
+            "is_deleted":    existing.get("is_deleted", False),
+        },
+        {
+            "title":         parsed.title,
+            "content_plain": parsed.content_plain,
+            "image_hashes":  image_hashes,
+            "is_deleted":    False,
+        },
         title_threshold=settings.title_ratio_threshold,
         body_threshold=settings.body_ratio_threshold,
         image_threshold=settings.image_ratio_threshold,
@@ -164,31 +159,42 @@ def process_result(
 
     if change["has_meaningful_change"]:
         next_version = int(existing["current_version"]) + 1
-        db.create_version(
-            version_payload(existing["id"], next_version, keyword, parsed, image_hashes)
-        )
-        db.create_change({
-            "article_id": existing["id"],
-            "from_version": existing["current_version"],
-            "to_version": next_version,
-            "title_changed": change["title_changed"],
-            "body_changed": change["body_changed"],
-            "image_changed": change["image_changed"],
-            "deleted_changed": change["deleted_changed"],
-            "change_score": change["change_score"],
-            "title_change_ratio": change["title_change_ratio"],
-            "body_change_ratio": change["body_change_ratio"],
-            "image_change_ratio": change["image_change_ratio"],
-            "changed_at": now,
-        })
+        try:
+            db.create_version(
+                version_payload(existing["id"], next_version, keyword, parsed, image_hashes)
+            )
+        except Exception as exc:
+            print(f"  [ERROR] 버전 저장 실패: {url} → {exc}")
+            db.update_article(existing["id"], next_values)
+            return parsed.normalized_url
+
+        try:
+            db.create_change({
+                "article_id": existing["id"],
+                "from_version": existing["current_version"],
+                "to_version": next_version,
+                "title_changed": change["title_changed"],
+                "body_changed": change["body_changed"],
+                "image_changed": change["image_changed"],
+                "deleted_changed": change["deleted_changed"],
+                "change_score": change["change_score"],
+                "title_change_ratio": change["title_change_ratio"],
+                "body_change_ratio": change["body_change_ratio"],
+                "image_change_ratio": change["image_change_ratio"],
+                "changed_at": now,
+            })
+        except Exception:
+            # unique 제약 충돌(이미 같은 버전 변경 기록 존재) → 무시
+            pass
+
         next_values["current_version"] = next_version
         changed_types = []
         if change["title_changed"]: changed_types.append("제목")
         if change["body_changed"]:  changed_types.append("본문")
         if change["image_changed"]: changed_types.append("사진")
-        print(f"  [CHANGED] v{next_version} [{','.join(changed_types)}]: {effective_title[:40]}")
+        print(f"  [CHANGED] v{next_version} [{','.join(changed_types)}]: {(effective_title or '')[:50]}")
     else:
-        print(f"  [NO-CHANGE] score={change['change_score']:.4f}: {effective_title[:40]}")
+        print(f"  [NO-CHANGE] score={change['change_score']:.4f}: {(effective_title or '')[:50]}")
 
     db.update_article(existing["id"], next_values)
     return parsed.normalized_url
@@ -228,7 +234,7 @@ def main() -> None:
             except Exception as exc:
                 print(f"  [ERROR] {result.url}: {exc}")
 
-    # ── Recheck: 기존 추적 기사 재확인 ─────────────────────
+    # ── Recheck: 최근 기사 우선 재확인 ──────────────────────
     print(f"\n[RECHECK] 기존 기사 재확인 (최대 {settings.max_recheck_articles}개)")
     rechecked = 0
     for article in db.list_articles_for_recheck(settings.max_recheck_articles):
@@ -237,7 +243,7 @@ def main() -> None:
         try:
             normalized_url = process_result(
                 db,
-                article.get("last_keyword") or "recheck",
+                article.get("last_keyword") or keywords[0],
                 article["url"],
                 article.get("press"),
                 None,
