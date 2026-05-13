@@ -50,21 +50,52 @@ function Badge({ label }: { label: string }) {
 
 export default function HomePage() {
   const [changes, setChanges] = useState<ArticleChange[]>([]);
+  const [keywords, setKeywords] = useState<string[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
   const [keyword, setKeyword] = useState("");
   const [loading, setLoading] = useState(false);
 
+  // keywords 테이블에서 동적으로 로드
+  useEffect(() => {
+    supabase
+      .from("keywords")
+      .select("keyword")
+      .eq("is_active", true)
+      .order("keyword")
+      .then(({ data }) => {
+        if (data) setKeywords(data.map((r: { keyword: string }) => r.keyword));
+      });
+  }, []);
+
   const fetchChanges = useCallback(async (p: number, kw: string) => {
     setLoading(true);
 
+    // 키워드 필터: articles 테이블에서 article_id 목록 먼저 조회
+    let articleIds: string[] | null = null;
+    if (kw) {
+      const { data: kwArticles } = await supabase
+        .from("articles")
+        .select("id")
+        .eq("last_keyword", kw);
+      articleIds = (kwArticles || []).map((a: { id: string }) => a.id);
+      if (articleIds.length === 0) {
+        setChanges([]);
+        setTotal(0);
+        setLoading(false);
+        return;
+      }
+    }
+
+    // 카운트
     let countQ = supabase
       .from("article_changes")
       .select("id", { count: "exact", head: true });
-    if (kw) countQ = countQ.eq("articles.last_keyword", kw);
+    if (articleIds) countQ = countQ.in("article_id", articleIds);
     const { count } = await countQ;
     setTotal(count || 0);
 
+    // 목록 조회
     let q = supabase
       .from("article_changes")
       .select(`
@@ -72,12 +103,14 @@ export default function HomePage() {
         title_changed, body_changed, image_changed, deleted_changed,
         change_score, changed_at,
         articles ( id, url, press, last_keyword, is_deleted ),
-        article_versions!article_changes_article_id_fkey ( title )
+        article_versions ( title )
       `)
       .order("changed_at", { ascending: false })
       .range(p * PAGE_SIZE, (p + 1) * PAGE_SIZE - 1);
+    if (articleIds) q = q.in("article_id", articleIds);
 
     const { data, error } = await q;
+    if (error) console.error("fetch error:", error);
     if (!error && data) setChanges(data as unknown as ArticleChange[]);
     setLoading(false);
   }, []);
@@ -86,7 +119,6 @@ export default function HomePage() {
     fetchChanges(page, keyword);
   }, [page, keyword, fetchChanges]);
 
-  // 자동 갱신 1분
   useEffect(() => {
     const t = setInterval(() => fetchChanges(page, keyword), 60000);
     return () => clearInterval(t);
@@ -106,9 +138,9 @@ export default function HomePage() {
         </p>
       </div>
 
-      {/* 필터 */}
+      {/* 키워드 필터 — Supabase keywords 테이블에서 동적 로드 */}
       <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>
-        {["", "빙그레", "삼양식품", "농심", "CJ제일제당", "오뚜기", "오리온", "롯데웰푸드"].map(kw => (
+        {["", ...keywords].map(kw => (
           <button
             key={kw}
             onClick={() => { setKeyword(kw); setPage(0); }}
@@ -135,7 +167,8 @@ export default function HomePage() {
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {changes.map(c => {
           const article = c.articles;
-          const title = c.article_versions?.title || "(제목 없음)";
+          const versions = Array.isArray(c.article_versions) ? c.article_versions : [c.article_versions];
+          const title = versions[0]?.title || "(제목 없음)";
           const types: string[] = [];
           if (c.title_changed) types.push("제목");
           if (c.body_changed) types.push("본문");
@@ -152,7 +185,6 @@ export default function HomePage() {
                 background: "#fff", borderRadius: 10, padding: "14px 16px",
                 border: "1px solid #e0e0e0",
                 boxShadow: "0 1px 3px rgba(0,0,0,0.05)",
-                transition: "box-shadow 0.15s",
               }}>
                 <div style={{ display: "flex", alignItems: "flex-start", gap: 8, marginBottom: 8 }}>
                   <div style={{ flex: 1, fontSize: 14, fontWeight: 600, lineHeight: 1.4 }}>
