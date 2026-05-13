@@ -1,27 +1,23 @@
 """
 네이버 뉴스 검색 모듈 — 네이버 검색 API 사용.
 
-공식 API: https://openapi.naver.com/v1/search/news.json
-- 서버 환경에서 차단 없음
-- 하루 25,000건 무료
-- 한 번 요청당 최대 100건
-- sort=date: 최신순
-
-GitHub Secrets 필요:
-  NAVER_CLIENT_ID
-  NAVER_CLIENT_SECRET
+개선사항:
+  - API 반환 link(n.news.naver.com) → 파싱 가능한 URL로 정규화
+  - originallink(언론사 원문)도 병행 저장
+  - HTML 태그 제거
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
 from urllib.parse import urlparse, parse_qs
+import re
 
 import httpx
 
 from config import Settings
 
 NAVER_NEWS_API = "https://openapi.naver.com/v1/search/news.json"
-MAX_DISPLAY = 100  # API 최대값
+MAX_DISPLAY = 100
 
 
 @dataclass(frozen=True)
@@ -32,10 +28,7 @@ class SearchResult:
 
 
 def search_naver_news(keyword: str, settings: Settings) -> list[SearchResult]:
-    """
-    네이버 검색 API로 키워드 관련 뉴스 기사 수집.
-    max_results_per_keyword 개수까지 페이지네이션으로 수집.
-    """
+    """네이버 검색 API로 키워드 관련 뉴스 수집."""
     if not settings.naver_client_id or not settings.naver_client_secret:
         print(f"  [ERROR] NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 환경변수가 없습니다.")
         return []
@@ -61,7 +54,7 @@ def search_naver_news(keyword: str, settings: Settings) -> list[SearchResult]:
             try:
                 r = client.get(NAVER_NEWS_API, params=params)
                 if r.status_code != 200:
-                    print(f"  [API ERROR] {keyword}: status={r.status_code}, {r.text[:100]}")
+                    print(f"  [API ERROR] {keyword}: status={r.status_code}, {r.text[:200]}")
                     break
                 data = r.json()
             except Exception as exc:
@@ -73,30 +66,49 @@ def search_naver_news(keyword: str, settings: Settings) -> list[SearchResult]:
                 break
 
             for item in items:
-                raw_url = item.get("originallink") or item.get("link", "")
-                if not raw_url or raw_url in seen:
+                naver_link = item.get("link", "")
+                original_link = item.get("originallink", "")
+
+                # ── URL 정규화 ──────────────────────────────────
+                # 네이버 API의 link는 n.news.naver.com/mnews/article/...
+                # 파싱은 n.news.naver.com/article/... 형태가 더 안정적
+                url = _normalize_naver_url(naver_link) or naver_link or original_link
+                if not url or url in seen:
                     continue
-
-                # 네이버 뉴스 URL로 변환 (originallink가 언론사 원문일 경우)
-                # link는 항상 네이버 뉴스 URL
-                naver_url = item.get("link", "")
-                url = naver_url if naver_url else raw_url
-
                 seen.add(url)
+
                 title = _strip_html(item.get("title", ""))
-                press = item.get("description", "")[:20] if item.get("description") else None
+                # description에서 언론사 추출 어려움 → press는 None으로
+                results.append(SearchResult(url=url, title=title, press=None))
 
-                results.append(SearchResult(url=url, title=title, press=press))
-
-            # 다음 페이지
             total = data.get("total", 0)
             start += len(items)
-            if start > min(total, 1000):  # API 최대 start=1000
+            if start > min(total, 1000):
                 break
 
     return results[:settings.max_results_per_keyword]
 
 
+def _normalize_naver_url(url: str) -> str | None:
+    """
+    n.news.naver.com/mnews/article/123/0001234567
+    → n.news.naver.com/article/123/0001234567
+    으로 변환 (mnews 제거).
+    """
+    if not url:
+        return None
+    try:
+        parsed = urlparse(url)
+        path = parsed.path
+        # /mnews/article/ → /article/
+        path = re.sub(r"^/mnews/", "/", path)
+        # /amp/article/ → /article/
+        path = re.sub(r"^/amp/", "/", path)
+        return parsed._replace(path=path, query="", fragment="").geturl()
+    except Exception:
+        return url
+
+
 def _strip_html(text: str) -> str:
-    """네이버 API 반환값의 <b>, </b> 태그 제거."""
-    return text.replace("<b>", "").replace("</b>", "").strip()
+    """<b>, </b> 등 HTML 태그 제거."""
+    return re.sub(r"<[^>]+>", "", text).strip()
