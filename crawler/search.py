@@ -1,16 +1,27 @@
 """
-네이버 뉴스 검색 모듈.
-개선: 페이지네이션으로 최대 max_search_pages 페이지까지 수집.
+네이버 뉴스 검색 모듈 — 네이버 검색 API 사용.
+
+공식 API: https://openapi.naver.com/v1/search/news.json
+- 서버 환경에서 차단 없음
+- 하루 25,000건 무료
+- 한 번 요청당 최대 100건
+- sort=date: 최신순
+
+GitHub Secrets 필요:
+  NAVER_CLIENT_ID
+  NAVER_CLIENT_SECRET
 """
 from __future__ import annotations
 
 from dataclasses import dataclass
-from urllib.parse import parse_qs, quote_plus, urlparse
+from urllib.parse import urlparse, parse_qs
 
 import httpx
-from bs4 import BeautifulSoup
 
 from config import Settings
+
+NAVER_NEWS_API = "https://openapi.naver.com/v1/search/news.json"
+MAX_DISPLAY = 100  # API 최대값
 
 
 @dataclass(frozen=True)
@@ -21,79 +32,71 @@ class SearchResult:
 
 
 def search_naver_news(keyword: str, settings: Settings) -> list[SearchResult]:
-    headers = {"User-Agent": settings.user_agent}
+    """
+    네이버 검색 API로 키워드 관련 뉴스 기사 수집.
+    max_results_per_keyword 개수까지 페이지네이션으로 수집.
+    """
+    if not settings.naver_client_id or not settings.naver_client_secret:
+        print(f"  [ERROR] NAVER_CLIENT_ID / NAVER_CLIENT_SECRET 환경변수가 없습니다.")
+        return []
+
+    headers = {
+        "X-Naver-Client-Id": settings.naver_client_id,
+        "X-Naver-Client-Secret": settings.naver_client_secret,
+    }
+
     results: list[SearchResult] = []
     seen: set[str] = set()
-    page_size = 10  # 네이버 검색 결과 기본 페이지당 10개
+    start = 1
 
-    with httpx.Client(
-        timeout=settings.request_timeout,
-        follow_redirects=True,
-        headers=headers,
-    ) as client:
-        for page in range(settings.max_search_pages):
-            start = page * page_size + 1
-            search_url = (
-                "https://search.naver.com/search.naver"
-                f"?where=news&query={quote_plus(keyword)}&sort=1&start={start}"
-            )
+    with httpx.Client(timeout=settings.request_timeout, headers=headers) as client:
+        while len(results) < settings.max_results_per_keyword:
+            display = min(MAX_DISPLAY, settings.max_results_per_keyword - len(results))
+            params = {
+                "query": keyword,
+                "display": display,
+                "start": start,
+                "sort": "date",
+            }
             try:
-                response = client.get(search_url)
-                response.raise_for_status()
-            except httpx.HTTPError as exc:
-                print(f"  [SEARCH ERROR] {keyword} page={page+1}: {exc}")
+                r = client.get(NAVER_NEWS_API, params=params)
+                if r.status_code != 200:
+                    print(f"  [API ERROR] {keyword}: status={r.status_code}, {r.text[:100]}")
+                    break
+                data = r.json()
+            except Exception as exc:
+                print(f"  [API ERROR] {keyword}: {exc}")
                 break
 
-            soup = BeautifulSoup(response.text, "html.parser")
-            page_results = _parse_search_page(soup, seen, settings.max_results_per_keyword - len(results))
-
-            results.extend(page_results)
-            if len(results) >= settings.max_results_per_keyword:
+            items = data.get("items", [])
+            if not items:
                 break
-            if not page_results:
-                break  # 더 이상 결과 없음
 
-    return results
+            for item in items:
+                raw_url = item.get("originallink") or item.get("link", "")
+                if not raw_url or raw_url in seen:
+                    continue
 
+                # 네이버 뉴스 URL로 변환 (originallink가 언론사 원문일 경우)
+                # link는 항상 네이버 뉴스 URL
+                naver_url = item.get("link", "")
+                url = naver_url if naver_url else raw_url
 
-def _parse_search_page(
-    soup: BeautifulSoup,
-    seen: set[str],
-    remaining: int,
-) -> list[SearchResult]:
-    results: list[SearchResult] = []
-    for item in soup.select("div.news_wrap, li.bx"):
-        if len(results) >= remaining:
-            break
-        link = item.select_one("a.news_tit")
-        if not link:
-            continue
-        raw_url = link.get("href")
-        if not raw_url:
-            continue
+                seen.add(url)
+                title = _strip_html(item.get("title", ""))
+                press = item.get("description", "")[:20] if item.get("description") else None
 
-        url = _unwrap_naver_redirect(raw_url)
-        if url in seen:
-            continue
-        seen.add(url)
+                results.append(SearchResult(url=url, title=title, press=press))
 
-        press_node = item.select_one("a.info.press, span.info.press")
-        press = (
-            press_node.get_text(" ", strip=True).replace("언론사 선정", "").strip()
-            if press_node else None
-        )
-        title = link.get("title") or link.get_text(" ", strip=True)
-        results.append(SearchResult(url=url, title=title, press=press))
+            # 다음 페이지
+            total = data.get("total", 0)
+            start += len(items)
+            if start > min(total, 1000):  # API 최대 start=1000
+                break
 
-    return results
+    return results[:settings.max_results_per_keyword]
 
 
-def _unwrap_naver_redirect(url: str) -> str:
-    parsed = urlparse(url)
-    if "naver.com" not in parsed.netloc:
-        return url
-    query = parse_qs(parsed.query)
-    for key in ("url", "u"):
-        if query.get(key):
-            return query[key][0]
-    return url
+def _strip_html(text: str) -> str:
+    """네이버 API 반환값의 <b>, </b> 태그 제거."""
+    return text.replace("<b>", "").replace("</b>", "").strip()
