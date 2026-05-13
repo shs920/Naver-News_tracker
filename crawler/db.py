@@ -43,11 +43,12 @@ class NewsTrackerDB:
         return (result.data or [None])[0]
 
     def list_articles_for_recheck(self, limit: int) -> list[dict[str, Any]]:
+        # 최근에 수집된 기사를 우선 재확인 (last_seen_at 내림차순)
         result = (
             self.client.table("articles")
             .select("id,url,normalized_url,press,last_keyword,last_seen_at")
             .eq("is_deleted", False)
-            .order("last_seen_at")
+            .order("last_seen_at", desc=True)
             .limit(limit)
             .execute()
         )
