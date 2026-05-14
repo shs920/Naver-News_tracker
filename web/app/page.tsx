@@ -22,9 +22,7 @@ interface ArticleChange {
     last_keyword: string | null;
     is_deleted: boolean;
   };
-  article_versions: {
-    title: string | null;
-  };
+  title: string | null;
 }
 
 const PAGE_SIZE = 50;
@@ -55,6 +53,7 @@ export default function HomePage() {
   const [page, setPage] = useState(0);
   const [keyword, setKeyword] = useState("");
   const [loading, setLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
 
   // keywords 테이블에서 동적으로 로드
   useEffect(() => {
@@ -70,6 +69,7 @@ export default function HomePage() {
 
   const fetchChanges = useCallback(async (p: number, kw: string) => {
     setLoading(true);
+    setErrorMessage("");
 
     // 키워드 필터: articles 테이블에서 article_id 목록 먼저 조회
     let articleIds: string[] | null = null;
@@ -87,31 +87,77 @@ export default function HomePage() {
       }
     }
 
-    // 카운트
+    // Count matching changes first so pagination stays accurate.
     let countQ = supabase
       .from("article_changes")
       .select("id", { count: "exact", head: true });
     if (articleIds) countQ = countQ.in("article_id", articleIds);
-    const { count } = await countQ;
+    const { count, error: countError } = await countQ;
+    if (countError) {
+      console.error("count error:", countError);
+      setErrorMessage(countError.message);
+      setChanges([]);
+      setTotal(0);
+      setLoading(false);
+      return;
+    }
     setTotal(count || 0);
 
-    // 목록 조회
+    // Fetch changes first. article_versions has no direct FK to article_changes,
+    // so version titles are fetched separately and merged client-side.
     let q = supabase
       .from("article_changes")
       .select(`
         id, article_id, from_version, to_version,
         title_changed, body_changed, image_changed, deleted_changed,
         change_score, changed_at,
-        articles ( id, url, press, last_keyword, is_deleted ),
-        article_versions ( title )
+        articles ( id, url, press, last_keyword, is_deleted )
       `)
       .order("changed_at", { ascending: false })
       .range(p * PAGE_SIZE, (p + 1) * PAGE_SIZE - 1);
     if (articleIds) q = q.in("article_id", articleIds);
 
     const { data, error } = await q;
-    if (error) console.error("fetch error:", error);
-    if (!error && data) setChanges(data as unknown as ArticleChange[]);
+    if (error) {
+      console.error("fetch error:", error);
+      setErrorMessage(error.message);
+      setChanges([]);
+      setLoading(false);
+      return;
+    }
+
+    const rawChanges = (data || []) as unknown as Omit<ArticleChange, "title">[];
+    if (rawChanges.length === 0) {
+      setChanges([]);
+      setLoading(false);
+      return;
+    }
+
+    const ids = Array.from(new Set(rawChanges.map(c => c.article_id)));
+    const versions = Array.from(new Set(rawChanges.map(c => c.to_version)));
+    const { data: versionRows, error: versionError } = await supabase
+      .from("article_versions")
+      .select("article_id, version, title")
+      .in("article_id", ids)
+      .in("version", versions);
+
+    if (versionError) {
+      console.error("version fetch error:", versionError);
+      setErrorMessage(versionError.message);
+      setChanges(rawChanges.map(c => ({ ...c, title: null })));
+      setLoading(false);
+      return;
+    }
+
+    const titleByChange = new Map<string, string | null>();
+    for (const row of versionRows || []) {
+      titleByChange.set(`${row.article_id}:${row.version}`, row.title);
+    }
+
+    setChanges(rawChanges.map(c => ({
+      ...c,
+      title: titleByChange.get(`${c.article_id}:${c.to_version}`) || null,
+    })));
     setLoading(false);
   }, []);
 
@@ -158,6 +204,11 @@ export default function HomePage() {
 
       {/* 목록 */}
       {loading && <p style={{ color: "#999", textAlign: "center" }}>로딩 중...</p>}
+      {!loading && errorMessage && (
+        <p style={{ color: "#c5221f", textAlign: "center", marginTop: 40 }}>
+          Supabase 조회 오류: {errorMessage}
+        </p>
+      )}
       {!loading && changes.length === 0 && (
         <p style={{ color: "#999", textAlign: "center", marginTop: 60 }}>
           수정된 기사가 없습니다
@@ -167,8 +218,7 @@ export default function HomePage() {
       <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
         {changes.map(c => {
           const article = c.articles;
-          const versions = Array.isArray(c.article_versions) ? c.article_versions : [c.article_versions];
-          const title = versions[0]?.title || "(제목 없음)";
+          const title = c.title || "(제목 없음)";
           const types: string[] = [];
           if (c.title_changed) types.push("제목");
           if (c.body_changed) types.push("본문");
