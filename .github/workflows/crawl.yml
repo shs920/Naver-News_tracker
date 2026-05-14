@@ -2,17 +2,17 @@ name: Crawl news changes
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "*/30 * * * *"
   workflow_dispatch:
 
 concurrency:
   group: news-crawler
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   crawl:
     runs-on: ubuntu-latest
-    timeout-minutes: 9
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
@@ -34,4 +34,7 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          MAX_RESULTS_PER_KEYWORD: "30"
+          MAX_RECHECK_ARTICLES: "20"
+          REQUEST_TIMEOUT: "10"
         run: python crawler/main.py

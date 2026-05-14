@@ -133,12 +133,14 @@ def process_result(
         {
             "title":         latest.get("title"),
             "content_plain": latest.get("content_plain"),
+            "image_urls":    latest.get("image_urls") or [],
             "image_hashes":  latest.get("image_hashes") or [],
             "is_deleted":    existing.get("is_deleted", False),
         },
         {
             "title":         parsed.title,
             "content_plain": parsed.content_plain,
+            "image_urls":    parsed.image_urls,
             "image_hashes":  image_hashes,
             "is_deleted":    False,
         },
