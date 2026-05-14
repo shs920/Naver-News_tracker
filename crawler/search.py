@@ -128,11 +128,15 @@ def _looks_like_article_url(url: str) -> bool:
     path = parsed.path.lower()
     if not path or path == "/":
         return False
-    if any(token in path for token in ("/search", "/ranking", "/section", "/category", "/photo", "/video", "/rss")):
+    if path.rstrip("/") in {"/news", "/main", "/home", "/index"}:
+        return False
+    if any(token in path for token in ("/search", "/ranking", "/section", "/category", "/video", "/rss")):
+        return False
+    if "/photo" in path and not re.search(r"\d{4,}", path):
         return False
     if re.search(r"\.(jpg|jpeg|png|gif|webp|mp4|pdf)$", path):
         return False
-    return bool(re.search(r"\d{4,}|article|news|view|read|idx|no=", path + "?" + parsed.query))
+    return bool(re.search(r"\d{4,}|article|view|read|idx|no=", path + "?" + parsed.query))
 
 
 def _strip_html(text: str) -> str:
