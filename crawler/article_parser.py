@@ -79,6 +79,8 @@ class ParsedArticle:
 def is_non_article_url(url: str) -> bool:
     """기사가 아닌 메인/섹션/랭킹 등 URL 차단."""
     path = urlparse(url).path
+    if "/photo" in path and re.search(r"\d{4,}", path):
+        return False
     return any(p.search(path) for p in NON_ARTICLE_PATH_PATTERNS)
 
 
@@ -107,7 +109,7 @@ def fetch_article(url: str, fallback_press: str | None, settings: Settings) -> P
     # 기사가 아닌 URL 사전 차단
     if is_non_article_url(url):
         print(f"  [SKIP] 비기사 URL: {url}")
-        return _deleted(url, normalized_url, fallback_press, status_code=None)
+        return _failed(url, normalized_url, fallback_press, status_code=None)
 
     headers = {"User-Agent": settings.user_agent}
 
@@ -120,21 +122,34 @@ def fetch_article(url: str, fallback_press: str | None, settings: Settings) -> P
             response = client.get(url)
     except httpx.HTTPError as exc:
         print(f"  [ERROR] HTTP 요청 실패: {url} → {exc}")
-        return _deleted(url, normalized_url, fallback_press, status_code=None)
+        return _failed(url, normalized_url, fallback_press, status_code=None)
 
     final_url = str(response.url)
     html = response.text or ""
 
+    if response.status_code == 403:
+        return _failed(url, normalized_url, fallback_press,
+                       final_url=final_url, status_code=response.status_code)
     if _is_deleted_response(response.status_code, html, url, final_url):
         return _deleted(url, normalized_url, fallback_press,
                         final_url=final_url, status_code=response.status_code)
+    if is_non_article_url(final_url):
+        print(f"  [SKIP] redirect landed on non-article URL: {final_url}")
+        return _failed(url, normalized_url, fallback_press,
+                       final_url=final_url, status_code=response.status_code)
 
     soup = BeautifulSoup(html, "html.parser")
     title = _extract_title(soup, html)
     press = _extract_press(soup) or fallback_press
     content_html, parse_quality = _extract_content(soup, html, press)
     content_plain = _html_to_plain(content_html)
-    image_urls = _extract_images(soup)
+    if _is_low_quality_content(content_plain, title, final_url):
+        print(f"  [SKIP-QUALITY] low quality article body: {url}")
+        content_html = None
+        content_plain = None
+        parse_quality = "failed"
+    content_soup = BeautifulSoup(content_html or "", "html.parser")
+    image_urls = _extract_images(content_soup, soup)
 
     # 본문 품질 검사: 완전히 비어있는 경우만 failed 처리
     # (짧은 속보 기사 등은 정상 저장)
@@ -170,10 +185,22 @@ def _deleted(
     )
 
 
+def _failed(
+    url: str, normalized_url: str, press: str | None,
+    final_url: str | None = None, status_code: int | None = None,
+) -> ParsedArticle:
+    return ParsedArticle(
+        url=url, normalized_url=normalized_url, final_url=final_url,
+        press=press, title=None, content=None, content_plain=None,
+        image_urls=[], is_deleted=False, status_code=status_code,
+        parse_quality="failed",
+    )
+
+
 def _is_deleted_response(
     status_code: int, html: str, original_url: str, final_url: str
 ) -> bool:
-    if status_code in {403, 404, 410}:
+    if status_code in {404, 410}:
         return True
 
     plain = BeautifulSoup(html, "html.parser").get_text(" ", strip=True)
@@ -188,7 +215,7 @@ def _is_deleted_response(
     # 다른 호스트 메인 페이지로 리다이렉트 → 삭제로 판단
     if orig_host and final_host and orig_host != final_host and final_path in {"", "/"}:
         return True
-    if final_path in {"", "/"} and "news" not in final_url.lower():
+    if final_path in {"", "/"}:
         return True
 
     return False
@@ -290,29 +317,67 @@ def _extract_press(soup: BeautifulSoup) -> str | None:
     return None
 
 
-def _extract_images(soup: BeautifulSoup) -> list[str]:
+def _is_low_quality_content(content_plain: str | None, title: str | None, final_url: str) -> bool:
+    if not content_plain:
+        return True
+    compact = re.sub(r"\s+", "", content_plain)
+    if len(compact) < MIN_CONTENT_LENGTH:
+        return True
+    if is_non_article_url(final_url):
+        return True
+    noise_terms = (
+        "관련기사",
+        "많이본뉴스",
+        "인기뉴스",
+        "추천기사",
+        "포토뉴스",
+        "구독",
+        "로그인",
+        "회원가입",
+        "전체기사",
+        "뉴스레터",
+    )
+    if sum(content_plain.count(term) for term in noise_terms) >= 5:
+        return True
+    return False
+
+
+def _extract_images(content_soup: BeautifulSoup, page_soup: BeautifulSoup) -> list[str]:
     urls: list[str] = []
     seen: set[str] = set()
     selectors = [
-        "meta[property='og:image']",
         "#dic_area img",
         ".article_body img",
         "article img",
         ".newsct_article img",
+        "img",
     ]
     for sel in selectors:
-        for node in soup.select(sel):
+        for node in content_soup.select(sel):
             url = node.get("content") or node.get("src") or node.get("data-src")
-            if not url or url.startswith("data:") or url in seen:
+            if not _is_valid_article_image_url(url, seen):
                 continue
             # 아이콘/로고 제외 (작은 이미지 URL 패턴)
-            if any(kw in url for kw in ("icon", "logo", "btn_", "bullet", "blank")):
-                continue
             seen.add(url)
             urls.append(url)
         if len(urls) >= 10:
             break
+    if not urls:
+        for node in page_soup.select("meta[property='og:image']"):
+            url = node.get("content")
+            if _is_valid_article_image_url(url, seen):
+                seen.add(url)
+                urls.append(url)
     return urls[:10]
+
+
+def _is_valid_article_image_url(url: str | None, seen: set[str]) -> bool:
+    if not url or url.startswith("data:") or url in seen:
+        return False
+    lowered = url.lower()
+    if any(kw in lowered for kw in ("icon", "logo", "btn_", "button", "bullet", "blank", "profile", "avatar")):
+        return False
+    return True
 
 
 def _html_to_plain(html: str | None) -> str | None:
