@@ -128,7 +128,9 @@ def _looks_like_article_url(url: str) -> bool:
     path = parsed.path.lower()
     if not path or path == "/":
         return False
-    if path.rstrip("/") in {"/news", "/main", "/home", "/index"}:
+    if path.rstrip("/") in {"/news", "/main", "/home", "/index", "/default.aspx"}:
+        return False
+    if "newstomato.com" in parsed.netloc.lower() and path.rstrip("/") in {"", "/default.aspx"}:
         return False
     if any(token in path for token in ("/search", "/ranking", "/section", "/category", "/video", "/rss")):
         return False

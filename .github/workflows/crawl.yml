@@ -2,7 +2,7 @@ name: Crawl news changes
 
 on:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "*/15 * * * *"
   workflow_dispatch:
 
 concurrency:
@@ -34,7 +34,7 @@ jobs:
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
-          MAX_RESULTS_PER_KEYWORD: "30"
-          MAX_RECHECK_ARTICLES: "20"
+          MAX_RESULTS_PER_KEYWORD: "50"
+          MAX_RECHECK_ARTICLES: "50"
           REQUEST_TIMEOUT: "10"
         run: python crawler/main.py

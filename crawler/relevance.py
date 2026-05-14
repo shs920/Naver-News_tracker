@@ -29,33 +29,49 @@ def compute_relevance(
     title_text = title or ""
     body_text = content_plain or ""
     full_text = title_text + " " + body_text
+    title_fold = title_text.casefold()
+    body_fold = body_text.casefold()
+    full_fold = full_text.casefold()
 
     score = 0
     alias_found = False
 
     # ── alias 점수 ─────────────────────────────────────────
-    for alias in rule.get("aliases", []):
-        if alias in title_text:
+    aliases = [str(alias) for alias in rule.get("aliases", [])]
+    contexts = [str(ctx) for ctx in rule.get("required_context", [])]
+
+    title_alias_found = False
+    body_alias_found = False
+
+    for alias in aliases:
+        alias_fold = alias.casefold()
+        if alias_fold in title_fold:
             score += 15
             alias_found = True
-        elif alias in body_text:
+            title_alias_found = True
+        elif alias_fold in body_fold:
             score += 10
             alias_found = True
+            body_alias_found = True
 
     # ── required_context 점수 ──────────────────────────────
-    for ctx in rule.get("required_context", []):
-        if ctx in full_text:
+    for ctx in contexts:
+        if ctx.casefold() in full_fold:
             score += 3
 
     # ── exclude_keywords 감점 ──────────────────────────────
     for excl in rule.get("exclude_keywords", []):
-        if excl in full_text:
+        if str(excl).casefold() in full_fold:
             score -= 20
 
     # ── alias_only_pass 판단 ───────────────────────────────
     # alias_only_pass=True: alias만 발견돼도 required_context 없이 통과 가능
     # alias_only_pass=False: alias 발견 + context 점수 필요 (동음이의어 기업)
     alias_only_pass = rule.get("alias_only_pass", True)
+
+    body_only_alias = body_alias_found and not title_alias_found
+    if body_only_alias and not _has_near_context(body_text, aliases, contexts):
+        return (score, False)
 
     if alias_only_pass and alias_found and score >= 0:
         # exclude에 안 걸렸고 alias가 발견됐으면 통과
@@ -65,6 +81,24 @@ def compute_relevance(
         is_relevant = score >= MIN_RELEVANCE_SCORE
 
     return (score, is_relevant)
+
+
+def _has_near_context(text: str, aliases: list[str], contexts: list[str], window: int = 180) -> bool:
+    if not text:
+        return False
+    text_fold = text.casefold()
+    context_folds = [ctx.casefold() for ctx in contexts]
+    for alias in aliases:
+        alias_fold = alias.casefold()
+        start = text_fold.find(alias_fold)
+        while start >= 0:
+            left = max(0, start - window)
+            right = min(len(text_fold), start + len(alias_fold) + window)
+            snippet = text_fold[left:right]
+            if any(ctx in snippet for ctx in context_folds):
+                return True
+            start = text_fold.find(alias_fold, start + len(alias_fold))
+    return False
 
 
 def filter_by_relevance(
