@@ -69,10 +69,7 @@ def search_naver_news(keyword: str, settings: Settings) -> list[SearchResult]:
                 naver_link = item.get("link", "")
                 original_link = item.get("originallink", "")
 
-                # ── URL 정규화 ──────────────────────────────────
-                # 네이버 API의 link는 n.news.naver.com/mnews/article/...
-                # 파싱은 n.news.naver.com/article/... 형태가 더 안정적
-                url = _normalize_naver_url(naver_link) or naver_link or original_link
+                url = _best_article_url(naver_link, original_link)
                 if not url or url in seen:
                     continue
                 seen.add(url)
@@ -107,6 +104,35 @@ def _normalize_naver_url(url: str) -> str | None:
         return parsed._replace(path=path, query="", fragment="").geturl()
     except Exception:
         return url
+
+
+def _best_article_url(naver_link: str, original_link: str) -> str | None:
+    candidates = [
+        _normalize_naver_url(naver_link),
+        original_link,
+        naver_link,
+    ]
+    for candidate in candidates:
+        if candidate and _looks_like_article_url(candidate):
+            return candidate
+    return None
+
+
+def _looks_like_article_url(url: str) -> bool:
+    try:
+        parsed = urlparse(url)
+    except Exception:
+        return False
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return False
+    path = parsed.path.lower()
+    if not path or path == "/":
+        return False
+    if any(token in path for token in ("/search", "/ranking", "/section", "/category", "/photo", "/video", "/rss")):
+        return False
+    if re.search(r"\.(jpg|jpeg|png|gif|webp|mp4|pdf)$", path):
+        return False
+    return bool(re.search(r"\d{4,}|article|news|view|read|idx|no=", path + "?" + parsed.query))
 
 
 def _strip_html(text: str) -> str:
