@@ -115,4 +115,4 @@ NOISE_SELECTORS: list[str] = [
 
 # 최소 본문 길이.
 # 기사 수정 추적은 본문 품질이 중요하므로 광고/메뉴/짧은 오염 텍스트는 저장하지 않는다.
-MIN_CONTENT_LENGTH = 300
+MIN_CONTENT_LENGTH = 80
