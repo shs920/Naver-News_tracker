@@ -87,15 +87,11 @@ def detect_change(
     title_changed   = title_ratio  >= title_threshold
     body_changed    = body_ratio   >= body_threshold
     image_changed   = image_ratio  >= image_threshold
-    # Avoid noisy image-only alerts caused by a site's fallback og:image,
-    # logo, or crawler-side image extraction differences.
-    if image_changed and title_ratio == 0 and body_ratio == 0:
-        if not previous_image_urls or not current_image_urls:
-            image_changed = False
-            image_ratio = 0.0
-        elif len(previous_image_urls) == 1 and len(current_image_urls) == 1:
-            image_changed = False
-            image_ratio = 0.0
+    # Image-only changes are too noisy for news pages because recommendation
+    # blocks and lazy-loaded thumbnails move frequently across publishers.
+    if image_changed and not title_changed and not body_changed:
+        image_changed = False
+        image_ratio = 0.0
     deleted_changed = bool(previous.get("is_deleted", False)) != bool(current.get("is_deleted", False))
 
     score = max(title_ratio, body_ratio, image_ratio, 1.0 if deleted_changed else 0.0)
