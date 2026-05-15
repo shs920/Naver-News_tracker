@@ -12,10 +12,11 @@ class Settings:
     supabase_key: str
     naver_client_id: str
     naver_client_secret: str
-    request_timeout: float = 10.0
-    max_results_per_keyword: int = 50
+    request_timeout: float = 8.0
+    max_results_per_keyword: int = 30
     max_search_pages: int = 1
-    max_recheck_articles: int = 50
+    max_recheck_articles: int = 20
+    max_keywords_per_run: int = 6
     user_agent: str = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -47,10 +48,11 @@ def get_settings() -> Settings:
         supabase_key=supabase_key,
         naver_client_id=naver_client_id,
         naver_client_secret=naver_client_secret,
-        request_timeout=float(os.environ.get("REQUEST_TIMEOUT", "10")),
-        max_results_per_keyword=int(os.environ.get("MAX_RESULTS_PER_KEYWORD", "50")),
+        request_timeout=float(os.environ.get("REQUEST_TIMEOUT", "8")),
+        max_results_per_keyword=int(os.environ.get("MAX_RESULTS_PER_KEYWORD", "30")),
         max_search_pages=int(os.environ.get("MAX_SEARCH_PAGES", "1")),
-        max_recheck_articles=int(os.environ.get("MAX_RECHECK_ARTICLES", "50")),
+        max_recheck_articles=int(os.environ.get("MAX_RECHECK_ARTICLES", "20")),
+        max_keywords_per_run=int(os.environ.get("MAX_KEYWORDS_PER_RUN", "6")),
         title_ratio_threshold=float(os.environ.get("TITLE_RATIO_THRESHOLD", "0.08")),
         body_ratio_threshold=float(os.environ.get("BODY_RATIO_THRESHOLD", "0.05")),
         image_ratio_threshold=float(os.environ.get("IMAGE_RATIO_THRESHOLD", "0.20")),

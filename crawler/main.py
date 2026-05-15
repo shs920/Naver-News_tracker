@@ -24,6 +24,21 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def select_keywords_for_run(keywords: list[str], max_keywords_per_run: int) -> list[str]:
+    """Rotate keyword groups so scheduled runs finish before the next run starts."""
+    if max_keywords_per_run <= 0 or max_keywords_per_run >= len(keywords):
+        return keywords
+
+    # GitHub Actions runs every 15 minutes. Advancing one slot per run covers all
+    # keywords over several runs without repeatedly timing out on the full set.
+    slot = int(datetime.now(timezone.utc).timestamp() // (15 * 60))
+    start = (slot * max_keywords_per_run) % len(keywords)
+    selected = keywords[start:start + max_keywords_per_run]
+    if len(selected) < max_keywords_per_run:
+        selected.extend(keywords[:max_keywords_per_run - len(selected)])
+    return selected
+
+
 def version_payload(
     article_id: str,
     version: int,
@@ -205,13 +220,18 @@ def process_result(
 def main() -> None:
     settings = get_settings()
     db = NewsTrackerDB(settings)
-    keywords = db.get_active_keywords()
+    all_keywords = db.get_active_keywords()
 
-    if not keywords:
+    if not all_keywords:
         print("No active keywords found.")
         return
 
-    print(f"키워드 {len(keywords)}개 처리 시작: {', '.join(keywords)}")
+    keywords = select_keywords_for_run(all_keywords, settings.max_keywords_per_run)
+    print(
+        f"키워드 {len(keywords)}/{len(all_keywords)}개 처리 시작 "
+        f"(MAX_KEYWORDS_PER_RUN={settings.max_keywords_per_run}): "
+        f"{', '.join(keywords)}"
+    )
 
     total_new = 0
     total_changed = 0

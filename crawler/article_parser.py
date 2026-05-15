@@ -68,8 +68,6 @@ ARTICLE_TAIL_MARKERS = (
     "Copyright",
     "copyright",
     "GAM -",
-    "help",
-    "more",
 )
 
 LOW_QUALITY_TEXT_MARKERS = (
