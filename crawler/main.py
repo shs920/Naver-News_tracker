@@ -15,7 +15,7 @@ from article_parser import ParsedArticle, fetch_article
 from config import get_settings
 from db import NewsTrackerDB
 from diff_engine import detect_change, stable_hash
-from image_hash import compute_image_hashes
+from image_hash import compute_image_fingerprints
 from relevance import filter_by_relevance
 from search import search_naver_news
 
@@ -44,6 +44,7 @@ def version_payload(
     version: int,
     keyword: str,
     parsed: ParsedArticle,
+    image_urls: list[str],
     image_hashes: list[str],
 ) -> dict[str, Any]:
     return {
@@ -53,7 +54,7 @@ def version_payload(
         "title": parsed.title,
         "content": parsed.content,
         "content_plain": parsed.content_plain,
-        "image_urls": parsed.image_urls,
+        "image_urls": image_urls,
         "image_hashes": image_hashes,
         "title_hash": stable_hash(parsed.title),
         "content_hash": stable_hash(parsed.content_plain),
@@ -98,7 +99,7 @@ def process_result(
         return None
 
     # ── 5. 이미지 해시 계산 ──────────────────────────────────
-    image_hashes = compute_image_hashes(parsed.image_urls, settings)
+    image_urls, image_hashes = compute_image_fingerprints(parsed.image_urls, settings)
 
     now = utc_now_iso()
     existing = db.get_article_by_normalized_url(parsed.normalized_url)
@@ -118,7 +119,7 @@ def process_result(
                 "deleted_at": None,
                 "last_keyword": keyword,
             })
-            db.create_version(version_payload(article["id"], 1, keyword, parsed, image_hashes))
+            db.create_version(version_payload(article["id"], 1, keyword, parsed, image_urls, image_hashes))
             print(f"  [NEW] v1 저장: {(effective_title or '')[:50]}")
         except Exception as exc:
             print(f"  [ERROR] 신규 저장 실패: {url} → {exc}")
@@ -130,7 +131,7 @@ def process_result(
         # 버전 데이터 없으면 v1으로 저장
         try:
             db.create_version(
-                version_payload(existing["id"], 1, keyword, parsed, image_hashes)
+                version_payload(existing["id"], 1, keyword, parsed, image_urls, image_hashes)
             )
             db.update_article(existing["id"], {
                 "url": parsed.url,
@@ -155,7 +156,7 @@ def process_result(
         {
             "title":         parsed.title,
             "content_plain": parsed.content_plain,
-            "image_urls":    parsed.image_urls,
+            "image_urls":    image_urls,
             "image_hashes":  image_hashes,
             "is_deleted":    False,
         },
@@ -178,7 +179,7 @@ def process_result(
         next_version = int(existing["current_version"]) + 1
         try:
             db.create_version(
-                version_payload(existing["id"], next_version, keyword, parsed, image_hashes)
+                version_payload(existing["id"], next_version, keyword, parsed, image_urls, image_hashes)
             )
         except Exception as exc:
             print(f"  [ERROR] 버전 저장 실패: {url} → {exc}")
@@ -244,6 +245,13 @@ def main() -> None:
 
         for result in results:
             try:
+                if not filter_by_relevance(
+                    keyword,
+                    result.title,
+                    getattr(result, "description", None),
+                ):
+                    total_skipped += 1
+                    continue
                 normalized_url = process_result(
                     db, keyword, result.url, result.press, result.title, settings
                 )

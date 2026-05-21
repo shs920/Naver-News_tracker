@@ -85,6 +85,29 @@ function wordDiff(oldText: string, newText: string): { oldTokens: Token[]; newTo
   return { oldTokens, newTokens };
 }
 
+function normalizePara(text: string): string {
+  return (text || "")
+    .toLowerCase()
+    .replace(/[\s"'“”‘’.,!?;:()[\]{}<>·ㆍ…]+/g, "")
+    .trim();
+}
+
+function similarity(a: string, b: string): number {
+  const aa = normalizePara(a);
+  const bb = normalizePara(b);
+  if (!aa && !bb) return 1;
+  if (!aa || !bb) return 0;
+  const m = aa.length;
+  const n = bb.length;
+  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = aa[i - 1] === bb[j - 1] ? dp[i - 1][j - 1] + 1 : Math.max(dp[i - 1][j], dp[i][j - 1]);
+    }
+  }
+  return dp[m][n] / Math.max(m, n);
+}
+
 function renderTokens(tokens: Token[]) {
   const HL: React.CSSProperties = { background: "#ffd6d6", color: "#7a0000", fontWeight: 700, borderRadius: 2, padding: "0 1px" };
   return tokens.map((t, i) =>
@@ -98,23 +121,24 @@ type ParaDiff = { type: "same"|"del"|"add"|"change"; old?: string; new?: string 
 function paragraphDiff(oldText: string, newText: string): ParaDiff[] {
   const split = (t: string) => (t || "").split(/\n+/).filter(p => p.trim());
   const oldP = split(oldText), newP = split(newText);
+  const oldN = oldP.map(normalizePara), newN = newP.map(normalizePara);
   const m = oldP.length, n = newP.length;
   const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
   for (let i = 1; i <= m; i++)
     for (let j = 1; j <= n; j++)
-      dp[i][j] = oldP[i-1] === newP[j-1] ? dp[i-1][j-1] + 1 : Math.max(dp[i-1][j], dp[i][j-1]);
+      dp[i][j] = oldN[i-1] === newN[j-1] ? dp[i-1][j-1] + 1 : Math.max(dp[i-1][j], dp[i][j-1]);
 
   const raw: ParaDiff[] = [];
   let i = m, j = n;
   while (i > 0 || j > 0) {
-    if (i > 0 && j > 0 && oldP[i-1] === newP[j-1]) { raw.unshift({ type: "same", old: oldP[i-1], new: oldP[i-1] }); i--; j--; }
+    if (i > 0 && j > 0 && oldN[i-1] === newN[j-1]) { raw.unshift({ type: "same", old: oldP[i-1], new: newP[j-1] }); i--; j--; }
     else if (j > 0 && (i === 0 || dp[i][j-1] >= dp[i-1][j])) { raw.unshift({ type: "add", new: newP[j-1] }); j--; }
     else { raw.unshift({ type: "del", old: oldP[i-1] }); i--; }
   }
 
   const merged: ParaDiff[] = [];
   for (let k = 0; k < raw.length; k++) {
-    if (raw[k].type === "del" && raw[k+1]?.type === "add") {
+    if (raw[k].type === "del" && raw[k+1]?.type === "add" && similarity(raw[k].old || "", raw[k+1].new || "") >= 0.45) {
       merged.push({ type: "change", old: raw[k].old, new: raw[k+1].new }); k++;
     } else merged.push(raw[k]);
   }

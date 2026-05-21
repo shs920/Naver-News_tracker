@@ -33,6 +33,36 @@ def change_ratio(before: str | None, after: str | None) -> float:
     return 1.0 - SequenceMatcher(None, before_norm, after_norm).ratio()
 
 
+def body_change_ratio(before: str | None, after: str | None) -> float:
+    before_paras = split_normalized_paragraphs(before)
+    after_paras = split_normalized_paragraphs(after)
+    if not before_paras and not after_paras:
+        return 0.0
+    if not before_paras or not after_paras:
+        return 1.0
+
+    m, n = len(before_paras), len(after_paras)
+    dp = [[0] * (n + 1) for _ in range(m + 1)]
+    for i in range(1, m + 1):
+        for j in range(1, n + 1):
+            if before_paras[i - 1] == after_paras[j - 1]:
+                dp[i][j] = dp[i - 1][j - 1] + len(before_paras[i - 1])
+            else:
+                dp[i][j] = max(dp[i - 1][j], dp[i][j - 1])
+
+    unchanged_chars = dp[m][n]
+    total_chars = max(sum(map(len, before_paras)), sum(map(len, after_paras)), 1)
+    return 1.0 - (unchanged_chars / total_chars)
+
+
+def split_normalized_paragraphs(value: str | None) -> list[str]:
+    if not value:
+        return []
+    paragraphs = [p.strip() for p in re.split(r"\n{1,}", value) if p.strip()]
+    normalized = [normalize_meaningful_text(p) for p in paragraphs]
+    return [p for p in normalized if len(p) >= 12]
+
+
 def image_change_ratio(
     before_hashes: list[str],
     after_hashes: list[str],
@@ -75,7 +105,7 @@ def detect_change(
     image_hamming_threshold: int,
 ) -> dict[str, Any]:
     title_ratio = change_ratio(previous.get("title"), current.get("title"))
-    body_ratio  = change_ratio(previous.get("content_plain"), current.get("content_plain"))
+    body_ratio  = body_change_ratio(previous.get("content_plain"), current.get("content_plain"))
     image_ratio = image_change_ratio(
         previous.get("image_hashes") or [],
         current.get("image_hashes") or [],

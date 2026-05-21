@@ -25,6 +25,7 @@ class SearchResult:
     url: str
     title: str | None = None
     press: str | None = None
+    description: str | None = None
 
 
 def search_naver_news(keyword: str, settings: Settings) -> list[SearchResult]:
@@ -75,8 +76,8 @@ def search_naver_news(keyword: str, settings: Settings) -> list[SearchResult]:
                 seen.add(url)
 
                 title = _strip_html(item.get("title", ""))
-                # description에서 언론사 추출 어려움 → press는 None으로
-                results.append(SearchResult(url=url, title=title, press=None))
+                description = _strip_html(item.get("description", ""))
+                results.append(SearchResult(url=url, title=title, press=None, description=description))
 
             total = data.get("total", 0)
             start += len(items)

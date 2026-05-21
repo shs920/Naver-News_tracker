@@ -19,7 +19,7 @@ class NewsTrackerDB:
             .order("keyword")
             .execute()
         )
-        return [row["keyword"] for row in (result.data or [])]
+        return sorted({row["keyword"] for row in (result.data or []) if row.get("keyword")})
 
     def get_article_by_normalized_url(self, normalized_url: str) -> dict[str, Any] | None:
         result = (

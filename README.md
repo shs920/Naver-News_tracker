@@ -52,9 +52,10 @@ GitHub Actions Secrets 또는 로컬 `.env`에 설정합니다.
 | --- | --- | --- |
 | `SUPABASE_URL` | 예 | Supabase Project URL |
 | `SUPABASE_KEY` | 예 | Supabase `service_role` key. GitHub Secrets에만 저장하세요. |
-| `REQUEST_TIMEOUT` | 아니오 | HTTP 요청 타임아웃 초. 기본값 `15` |
-| `MAX_RESULTS_PER_KEYWORD` | 아니오 | 키워드별 네이버 뉴스 검색 결과 처리 개수. 기본값 `20` |
-| `MAX_RECHECK_ARTICLES` | 아니오 | 기존 추적 기사 재확인 개수. 기본값 `50` |
+| `REQUEST_TIMEOUT` | 아니오 | HTTP 요청 타임아웃 초. 기본값 `10` |
+| `MAX_RESULTS_PER_KEYWORD` | 아니오 | 키워드별 네이버 뉴스 검색 결과 조회 개수. 기본값 `100` |
+| `MAX_RECHECK_ARTICLES` | 아니오 | 기존 추적 기사 재확인 개수. 기본값 `80` |
+| `MAX_KEYWORDS_PER_RUN` | 아니오 | 1회 실행에서 처리할 키워드 수. `0`이면 전체 처리. 기본값 `0` |
 
 ## 크롤러 로컬 실행
 
@@ -154,7 +155,8 @@ npm run build
 
 - `crawler/main.py`는 GitHub Actions에서 실행되도록 workflow와 requirements가 연결되어 있습니다.
 - `crawler/requirements.txt`에는 `readability-lxml` 실행에 필요한 `lxml`을 명시했습니다.
-- 검색 결과 기사 처리 후, 오래된 기존 기사도 `MAX_RECHECK_ARTICLES` 개수만큼 재확인해 삭제/비공개 전환 감지를 보강했습니다.
+- 네이버 검색 API의 제목/요약에서 1차 관련성 필터를 적용해 비관련 기사 fetch 시간을 줄이고, 기존 기사도 `MAX_RECHECK_ARTICLES` 개수만큼 재확인합니다.
+- 본문 비교는 문단 정렬 기반으로 처리해 중간 문단 삽입 시 뒤 문단 전체가 수정된 것처럼 보이는 현상을 줄입니다.
 - 웹 메인 페이지는 최근 변경 목록, 변경 유형, 언론사, 변경 시각, 버전 번호를 표시합니다.
 - 웹 상세 페이지는 제목, 본문, 사진을 좌우 비교하고 변경 단어만 강조 표시합니다.
 

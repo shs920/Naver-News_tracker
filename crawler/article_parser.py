@@ -249,7 +249,7 @@ def _extract_content(
         for node in soup.select(selector)[:3]:
             fragment = _clean_content_node(node)
             plain = _html_to_plain(fragment)
-            score = _content_candidate_score(plain, title)
+            score = _content_candidate_score(plain, title) - _fragment_noise_penalty(fragment)
             if score > 0:
                 candidates.append((score, fragment))
 
@@ -261,7 +261,7 @@ def _extract_content(
         summary = Document(html).summary(html_partial=True)
         fragment = _clean_content_node(BeautifulSoup(summary, "html.parser"))
         plain = _html_to_plain(fragment)
-        if _content_candidate_score(plain, title) > 0:
+        if _content_candidate_score(plain, title) - _fragment_noise_penalty(fragment) > 0:
             return fragment, "readability"
     except Exception:
         pass
@@ -372,6 +372,27 @@ def _content_candidate_score(plain: str | None, title: str | None) -> int:
         score += len(title_tokens & body_tokens) * 80
 
     return score
+
+
+def _fragment_noise_penalty(fragment: str) -> int:
+    soup = BeautifulSoup(fragment, "html.parser")
+    plain = _html_to_plain(fragment) or ""
+    compact_length = max(1, len(re.sub(r"\s+", "", plain)))
+    link_text = " ".join(a.get_text(" ", strip=True) for a in soup.select("a"))
+    link_ratio = len(re.sub(r"\s+", "", link_text)) / compact_length
+
+    penalty = 0
+    if link_ratio > 0.18:
+        penalty += int(compact_length * link_ratio)
+
+    image_count = len(soup.select("img"))
+    paragraph_count = len([p for p in soup.select("p") if p.get_text(" ", strip=True)])
+    if image_count >= 8 and paragraph_count <= 2:
+        penalty += 400
+
+    marker_hits = sum(1 for marker in ARTICLE_TAIL_MARKERS if marker in plain)
+    penalty += marker_hits * 250
+    return penalty
 
 
 def _extract_title(soup: BeautifulSoup, html: str) -> str | None:
@@ -488,13 +509,33 @@ def _html_to_plain(html: str | None) -> str | None:
 def _clean_article_plain(text: str | None) -> str | None:
     if not text:
         return None
-    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    lines = [
+        line.strip()
+        for line in text.splitlines()
+        if line.strip() and not _is_noise_line(line.strip())
+    ]
     text = "\n".join(lines)
     for marker in ARTICLE_TAIL_MARKERS:
         index = text.find(marker)
         if index > 0:
             text = text[:index].strip()
     return text or None
+
+
+def _is_noise_line(line: str) -> bool:
+    compact = re.sub(r"\s+", "", line)
+    if not compact:
+        return True
+    if re.search(r"[\w.+-]+@[\w.-]+\.\w+", line):
+        return True
+    if any(token in compact for token in (
+        "무단전재", "재배포금지", "저작권자", "Copyright", "기자페이지",
+        "구독하기", "좋아요", "공유하기", "댓글", "관련기사", "많이본뉴스",
+    )):
+        return True
+    if len(compact) <= 2 and compact.isdigit():
+        return True
+    return False
 
 
 def _clean(value: str | None) -> str | None:
