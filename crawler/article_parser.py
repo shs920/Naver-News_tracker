@@ -509,11 +509,11 @@ def _html_to_plain(html: str | None) -> str | None:
 def _clean_article_plain(text: str | None) -> str | None:
     if not text:
         return None
-    lines = [
-        line.strip()
-        for line in text.splitlines()
-        if line.strip() and not _is_noise_line(line.strip())
-    ]
+    lines = []
+    for raw_line in text.splitlines():
+        line = _strip_inline_noise(raw_line.strip())
+        if line and not _is_noise_line(line):
+            lines.append(line)
     text = "\n".join(lines)
     for marker in ARTICLE_TAIL_MARKERS:
         index = text.find(marker)
@@ -522,11 +522,15 @@ def _clean_article_plain(text: str | None) -> str | None:
     return text or None
 
 
+def _strip_inline_noise(line: str) -> str:
+    line = re.sub(r"[\w.+-]+@[\w.-]+\.\w+", "", line)
+    line = re.sub(r"\s{2,}", " ", line)
+    return line.strip()
+
+
 def _is_noise_line(line: str) -> bool:
     compact = re.sub(r"\s+", "", line)
     if not compact:
-        return True
-    if re.search(r"[\w.+-]+@[\w.-]+\.\w+", line):
         return True
     if any(token in compact for token in (
         "무단전재", "재배포금지", "저작권자", "Copyright", "기자페이지",
