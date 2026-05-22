@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useParams, useSearchParams, useRouter } from "next/navigation";
+import type { CSSProperties, ReactNode } from "react";
+import { useEffect, useMemo, useState } from "react";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "../../../lib/supabase";
 
 interface Version {
@@ -23,69 +24,189 @@ interface Article {
   is_deleted: boolean;
 }
 
-// ── pHash 해밍 거리 ───────────────────────────────────────
+type Token = { text: string; changed: boolean };
+type DiffRow = {
+  type: "same" | "add" | "delete" | "change";
+  before?: string;
+  after?: string;
+};
+
+const pageStyle: CSSProperties = {
+  minHeight: "100vh",
+  background: "#f4f5f7",
+  color: "#1e1e23",
+  padding: "22px 18px 56px",
+};
+
+const shellStyle: CSSProperties = {
+  width: "min(1480px, 100%)",
+  margin: "0 auto",
+};
+
+const topBarStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: 12,
+  marginBottom: 16,
+};
+
+const backButtonStyle: CSSProperties = {
+  border: "1px solid #d7dce3",
+  borderRadius: 6,
+  background: "#fff",
+  color: "#2459c5",
+  cursor: "pointer",
+  fontSize: 13,
+  fontWeight: 700,
+  padding: "8px 11px",
+};
+
+const versionBarStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  flexWrap: "wrap",
+  gap: 10,
+  border: "1px solid #dfe5ee",
+  borderRadius: 8,
+  background: "#eef3ff",
+  padding: "12px 14px",
+  marginBottom: 18,
+};
+
+const articleGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)",
+  gap: 16,
+  alignItems: "start",
+};
+
+const articlePaperStyle: CSSProperties = {
+  background: "#fff",
+  border: "1px solid #d9dde3",
+  borderRadius: 8,
+  minWidth: 0,
+  overflow: "hidden",
+};
+
+const articleInnerStyle: CSSProperties = {
+  padding: "24px 26px 34px",
+};
+
+const labelStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  height: 28,
+  borderRadius: 999,
+  background: "#f1f3f6",
+  color: "#5f6673",
+  fontSize: 12,
+  fontWeight: 800,
+  padding: "0 10px",
+  marginBottom: 16,
+};
+
+const headlineStyle: CSSProperties = {
+  margin: "0 0 12px",
+  fontSize: 28,
+  lineHeight: 1.28,
+  fontWeight: 800,
+  letterSpacing: 0,
+};
+
+const metaStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  flexWrap: "wrap",
+  gap: 8,
+  color: "#6b7280",
+  fontSize: 13,
+  borderBottom: "1px solid #e6e8ec",
+  paddingBottom: 18,
+  marginBottom: 22,
+};
+
+const bodyStyle: CSSProperties = {
+  fontSize: 17,
+  lineHeight: 1.88,
+  letterSpacing: 0,
+  wordBreak: "keep-all",
+  overflowWrap: "anywhere",
+};
+
+const paragraphStyle: CSSProperties = {
+  margin: "0 0 18px",
+};
+
+const imageStyle: CSSProperties = {
+  display: "block",
+  width: "100%",
+  height: "auto",
+  borderRadius: 3,
+  margin: "0 0 18px",
+};
+
+const changedStyle: CSSProperties = {
+  background: "#ffe0de",
+  color: "#a3120a",
+  fontWeight: 800,
+  borderRadius: 3,
+  boxShadow: "0 0 0 1px rgba(211, 47, 47, 0.12)",
+  padding: "0 2px",
+};
+
+const changedBlockStyle: CSSProperties = {
+  ...paragraphStyle,
+  background: "#fff0ef",
+  borderLeft: "4px solid #d93025",
+  borderRadius: 5,
+  color: "#3a1d1b",
+  padding: "8px 10px",
+};
+
+const selectStyle: CSSProperties = {
+  height: 32,
+  border: "1px solid #cbd3df",
+  borderRadius: 6,
+  background: "#fff",
+  color: "#20242a",
+  fontSize: 13,
+  padding: "0 8px",
+};
+
 function hammingDistance(a: string, b: string): number {
   try {
-    const na = BigInt(`0x${a}`), nb = BigInt(`0x${b}`);
-    return (na ^ nb).toString(2).split("").filter(c => c === "1").length;
-  } catch { return 999; }
+    return (BigInt(`0x${a}`) ^ BigInt(`0x${b}`)).toString(2).split("").filter((c) => c === "1").length;
+  } catch {
+    return 999;
+  }
 }
 
-function imagesReallyChanged(
-  oldHashes: string[], newHashes: string[],
-  oldUrls: string[], newUrls: string[],
-  threshold = 8
-): boolean {
-  if (oldHashes.length !== newHashes.length) return true;
-  if (oldHashes.length === 0) return false;
+function changedImageIndexes(beforeHashes: string[], afterHashes: string[], threshold = 8): Set<number> {
+  const usedBefore = new Set<number>();
+  const changed = new Set<number>();
 
-  // pHash 비교
-  if (oldHashes.length > 0 && newHashes.length > 0) {
-    const used = new Set<number>();
-    let matched = 0;
-    for (const oh of oldHashes) {
-      for (let i = 0; i < newHashes.length; i++) {
-        if (used.has(i)) continue;
-        if (hammingDistance(oh, newHashes[i]) <= threshold) {
-          matched++; used.add(i); break;
-        }
-      }
+  afterHashes.forEach((afterHash, afterIndex) => {
+    const matchedBefore = beforeHashes.findIndex(
+      (beforeHash, beforeIndex) => !usedBefore.has(beforeIndex) && hammingDistance(beforeHash, afterHash) <= threshold
+    );
+    if (matchedBefore >= 0) {
+      usedBefore.add(matchedBefore);
+      return;
     }
-    const ratio = 1 - matched / Math.max(oldHashes.length, newHashes.length);
-    return ratio >= 0.2;
+    changed.add(afterIndex);
+  });
+
+  if (beforeHashes.length !== afterHashes.length) {
+    afterHashes.forEach((_, index) => {
+      if (!changed.has(index) && index >= beforeHashes.length) changed.add(index);
+    });
   }
 
-  // fallback: URL 비교
-  return !oldUrls.every((u, i) => u === newUrls[i]);
+  return changed;
 }
 
-// ── 단어 단위 diff ────────────────────────────────────────
-type Token = { text: string; changed: boolean };
-
-function wordDiff(oldText: string, newText: string): { oldTokens: Token[]; newTokens: Token[] } {
-  const tok = (t: string) => (t || "").split(/(\s+)/);
-  const oldW = tok(oldText), newW = tok(newText);
-  const m = oldW.length, n = newW.length;
-  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
-  for (let i = 1; i <= m; i++)
-    for (let j = 1; j <= n; j++)
-      dp[i][j] = oldW[i-1] === newW[j-1] ? dp[i-1][j-1] + 1 : Math.max(dp[i-1][j], dp[i][j-1]);
-
-  type Op = { type: "same"|"del"|"add"; text: string };
-  const ops: Op[] = [];
-  let i = m, j = n;
-  while (i > 0 || j > 0) {
-    if (i > 0 && j > 0 && oldW[i-1] === newW[j-1]) { ops.unshift({ type: "same", text: oldW[i-1] }); i--; j--; }
-    else if (j > 0 && (i === 0 || dp[i][j-1] >= dp[i-1][j])) { ops.unshift({ type: "add", text: newW[j-1] }); j--; }
-    else { ops.unshift({ type: "del", text: oldW[i-1] }); i--; }
-  }
-
-  const oldTokens: Token[] = ops.filter(o => o.type !== "add").map(o => ({ text: o.text, changed: o.type === "del" }));
-  const newTokens: Token[] = ops.filter(o => o.type !== "del").map(o => ({ text: o.text, changed: o.type === "add" }));
-  return { oldTokens, newTokens };
-}
-
-function normalizePara(text: string): string {
+function normalizeText(text: string): string {
   return (text || "")
     .toLowerCase()
     .replace(/[\s"'“”‘’.,!?;:()[\]{}<>·ㆍ…]+/g, "")
@@ -93,118 +214,258 @@ function normalizePara(text: string): string {
 }
 
 function similarity(a: string, b: string): number {
-  const aa = normalizePara(a);
-  const bb = normalizePara(b);
+  const aa = normalizeText(a);
+  const bb = normalizeText(b);
   if (!aa && !bb) return 1;
   if (!aa || !bb) return 0;
-  const m = aa.length;
-  const n = bb.length;
-  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
+
+  const dp = Array.from({ length: aa.length + 1 }, () => new Array(bb.length + 1).fill(0));
+  for (let i = 1; i <= aa.length; i++) {
+    for (let j = 1; j <= bb.length; j++) {
       dp[i][j] = aa[i - 1] === bb[j - 1] ? dp[i - 1][j - 1] + 1 : Math.max(dp[i - 1][j], dp[i][j - 1]);
     }
   }
-  return dp[m][n] / Math.max(m, n);
+  return dp[aa.length][bb.length] / Math.max(aa.length, bb.length);
 }
 
-function renderTokens(tokens: Token[]) {
-  const HL: React.CSSProperties = { background: "#ffd6d6", color: "#7a0000", fontWeight: 700, borderRadius: 2, padding: "0 1px" };
-  return tokens.map((t, i) =>
-    t.changed ? <mark key={i} style={HL}>{t.text}</mark> : <span key={i}>{t.text}</span>
-  );
+function splitParagraphs(text: string | null): string[] {
+  return (text || "")
+    .split(/\n+/)
+    .map((paragraph) => paragraph.trim())
+    .filter(Boolean);
 }
 
-// ── 문단 LCS diff ─────────────────────────────────────────
-type ParaDiff = { type: "same"|"del"|"add"|"change"; old?: string; new?: string };
+function paragraphDiff(beforeText: string | null, afterText: string | null): DiffRow[] {
+  const before = splitParagraphs(beforeText);
+  const after = splitParagraphs(afterText);
+  const beforeNorm = before.map(normalizeText);
+  const afterNorm = after.map(normalizeText);
+  const dp = Array.from({ length: before.length + 1 }, () => new Array(after.length + 1).fill(0));
 
-function paragraphDiff(oldText: string, newText: string): ParaDiff[] {
-  const split = (t: string) => (t || "").split(/\n+/).filter(p => p.trim());
-  const oldP = split(oldText), newP = split(newText);
-  const oldN = oldP.map(normalizePara), newN = newP.map(normalizePara);
-  const m = oldP.length, n = newP.length;
-  const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
-  for (let i = 1; i <= m; i++)
-    for (let j = 1; j <= n; j++)
-      dp[i][j] = oldN[i-1] === newN[j-1] ? dp[i-1][j-1] + 1 : Math.max(dp[i-1][j], dp[i][j-1]);
-
-  const raw: ParaDiff[] = [];
-  let i = m, j = n;
-  while (i > 0 || j > 0) {
-    if (i > 0 && j > 0 && oldN[i-1] === newN[j-1]) { raw.unshift({ type: "same", old: oldP[i-1], new: newP[j-1] }); i--; j--; }
-    else if (j > 0 && (i === 0 || dp[i][j-1] >= dp[i-1][j])) { raw.unshift({ type: "add", new: newP[j-1] }); j--; }
-    else { raw.unshift({ type: "del", old: oldP[i-1] }); i--; }
+  for (let i = 1; i <= before.length; i++) {
+    for (let j = 1; j <= after.length; j++) {
+      dp[i][j] = beforeNorm[i - 1] === afterNorm[j - 1] ? dp[i - 1][j - 1] + 1 : Math.max(dp[i - 1][j], dp[i][j - 1]);
+    }
   }
 
-  const merged: ParaDiff[] = [];
-  for (let k = 0; k < raw.length; k++) {
-    if (raw[k].type === "del" && raw[k+1]?.type === "add" && similarity(raw[k].old || "", raw[k+1].new || "") >= 0.45) {
-      merged.push({ type: "change", old: raw[k].old, new: raw[k+1].new }); k++;
-    } else merged.push(raw[k]);
+  const raw: DiffRow[] = [];
+  let i = before.length;
+  let j = after.length;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && beforeNorm[i - 1] === afterNorm[j - 1]) {
+      raw.unshift({ type: "same", before: before[i - 1], after: after[j - 1] });
+      i--;
+      j--;
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      raw.unshift({ type: "add", after: after[j - 1] });
+      j--;
+    } else {
+      raw.unshift({ type: "delete", before: before[i - 1] });
+      i--;
+    }
+  }
+
+  const merged: DiffRow[] = [];
+  for (let index = 0; index < raw.length; index++) {
+    const current = raw[index];
+    const next = raw[index + 1];
+    if (current.type === "delete" && next?.type === "add" && similarity(current.before || "", next.after || "") >= 0.45) {
+      merged.push({ type: "change", before: current.before, after: next.after });
+      index++;
+    } else {
+      merged.push(current);
+    }
   }
   return merged;
 }
 
-// ── 본문 좌우 비교 ────────────────────────────────────────
-function BodyDiff({ oldText, newText, vA, vB }: {
-  oldText: string; newText: string; vA: number; vB: number;
+function wordDiff(beforeText: string, afterText: string): Token[] {
+  const before = beforeText.split(/(\s+)/);
+  const after = afterText.split(/(\s+)/);
+  const dp = Array.from({ length: before.length + 1 }, () => new Array(after.length + 1).fill(0));
+
+  for (let i = 1; i <= before.length; i++) {
+    for (let j = 1; j <= after.length; j++) {
+      dp[i][j] = before[i - 1] === after[j - 1] ? dp[i - 1][j - 1] + 1 : Math.max(dp[i - 1][j], dp[i][j - 1]);
+    }
+  }
+
+  const tokens: Token[] = [];
+  let i = before.length;
+  let j = after.length;
+  while (i > 0 || j > 0) {
+    if (i > 0 && j > 0 && before[i - 1] === after[j - 1]) {
+      tokens.unshift({ text: after[j - 1], changed: false });
+      i--;
+      j--;
+    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+      tokens.unshift({ text: after[j - 1], changed: after[j - 1].trim().length > 0 });
+      j--;
+    } else {
+      i--;
+    }
+  }
+  return tokens;
+}
+
+function renderHighlightedTokens(tokens: Token[]): ReactNode {
+  return tokens.map((token, index) =>
+    token.changed ? (
+      <mark key={index} style={changedStyle}>
+        {token.text}
+      </mark>
+    ) : (
+      <span key={index}>{token.text}</span>
+    )
+  );
+}
+
+function formatDate(value: string | null): string {
+  if (!value) return "";
+  return new Date(value).toLocaleString("ko-KR", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function VersionSelect({
+  label,
+  value,
+  versions,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  versions: Version[];
+  onChange: (value: number) => void;
 }) {
-  const diff = paragraphDiff(oldText, newText);
-  const N: React.CSSProperties = { fontSize: 13, lineHeight: 1.8, margin: "0 0 8px" };
-  const C: React.CSSProperties = { ...N, background: "#fff0f0", borderRadius: 4, padding: "3px 7px", borderLeft: "3px solid #e53935" };
-  const D: React.CSSProperties = { ...C, background: "#ffd6d6" };
-  const E: React.CSSProperties = { margin: "0 0 8px", minHeight: 22 };
+  return (
+    <label style={{ display: "inline-flex", alignItems: "center", gap: 7, fontSize: 13, fontWeight: 800 }}>
+      {label}
+      <select value={value} onChange={(event) => onChange(Number(event.target.value))} style={selectStyle}>
+        {versions.map((version) => (
+          <option key={version.id} value={version.version}>
+            v{version.version} - {formatDate(version.fetched_at)}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
+
+function ArticlePaper({
+  article,
+  version,
+  counterpart,
+  side,
+  diffRows,
+  changedImages,
+}: {
+  article: Article;
+  version: Version;
+  counterpart: Version;
+  side: "before" | "after";
+  diffRows: DiffRow[];
+  changedImages: Set<number>;
+}) {
+  const isAfter = side === "after";
+  const titleChanged = normalizeText(version.title || "") !== normalizeText(counterpart.title || "");
 
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
-      <div>
-        <div style={{ fontSize: 12, fontWeight: 700, color: "#c0392b", marginBottom: 10, paddingBottom: 6, borderBottom: "2px solid #f5c6c6" }}>
-          수정 전 (v{vA})
+    <article style={articlePaperStyle}>
+      <div style={articleInnerStyle}>
+        <span style={labelStyle}>{isAfter ? `수정 후 v${version.version}` : `수정 전 v${version.version}`}</span>
+
+        <h1 style={headlineStyle}>
+          {isAfter && titleChanged ? renderHighlightedTokens(wordDiff(counterpart.title || "", version.title || "")) : version.title || "제목 없음"}
+        </h1>
+
+        <div style={metaStyle}>
+          <strong style={{ color: "#31343a" }}>{article.press || "언론사 미확인"}</strong>
+          <span>{formatDate(version.fetched_at)}</span>
+          {article.last_keyword ? <span style={{ color: "#6f7785" }}>키워드 {article.last_keyword}</span> : null}
+          <a href={article.url} target="_blank" rel="noreferrer" style={{ color: "#2563eb", fontWeight: 800 }}>
+            원문 보기
+          </a>
         </div>
-        {diff.map((d, idx) => {
-          if (d.type === "same") return <p key={idx} style={N}>{d.old}</p>;
-          if (d.type === "del")  return <p key={idx} style={D}><strong style={{ color: "#7a0000" }}>{d.old}</strong></p>;
-          if (d.type === "add")  return <div key={idx} style={E} />;
-          const { oldTokens } = wordDiff(d.old!, d.new!);
-          return <p key={idx} style={C}>{renderTokens(oldTokens)}</p>;
-        })}
-      </div>
-      <div>
-        <div style={{ fontSize: 12, fontWeight: 700, color: "#c0392b", marginBottom: 10, paddingBottom: 6, borderBottom: "2px solid #f5c6c6" }}>
-          수정 후 (v{vB})
+
+        <div style={bodyStyle}>
+          <ImageStrip urls={version.image_urls || []} changedImages={isAfter ? changedImages : new Set()} />
+          {diffRows.map((row, index) => {
+            if (!isAfter) {
+              if (row.type === "add") return <div key={index} style={{ height: 0 }} />;
+              return (
+                <p key={index} style={paragraphStyle}>
+                  {row.before}
+                </p>
+              );
+            }
+
+            if (row.type === "same") {
+              return (
+                <p key={index} style={paragraphStyle}>
+                  {row.after}
+                </p>
+              );
+            }
+            if (row.type === "change") {
+              return (
+                <p key={index} style={changedBlockStyle}>
+                  {renderHighlightedTokens(wordDiff(row.before || "", row.after || ""))}
+                </p>
+              );
+            }
+            if (row.type === "add") {
+              return (
+                <p key={index} style={changedBlockStyle}>
+                  <mark style={changedStyle}>{row.after}</mark>
+                </p>
+              );
+            }
+            return (
+              <p key={index} style={{ ...changedBlockStyle, opacity: 0.78 }}>
+                삭제된 문단
+              </p>
+            );
+          })}
         </div>
-        {diff.map((d, idx) => {
-          if (d.type === "same") return <p key={idx} style={N}>{d.new}</p>;
-          if (d.type === "del")  return <div key={idx} style={E} />;
-          if (d.type === "add")  return <p key={idx} style={D}><strong style={{ color: "#7a0000" }}>{d.new}</strong></p>;
-          const { newTokens } = wordDiff(d.old!, d.new!);
-          return <p key={idx} style={C}>{renderTokens(newTokens)}</p>;
-        })}
       </div>
+    </article>
+  );
+}
+
+function ImageStrip({ urls, changedImages }: { urls: string[]; changedImages: Set<number> }) {
+  if (!urls.length) return null;
+  return (
+    <div>
+      {urls.map((url, index) => {
+        const changed = changedImages.has(index);
+        return (
+          <figure key={`${url}-${index}`} style={{ margin: "0 0 20px" }}>
+            <img
+              src={url}
+              alt=""
+              style={{
+                ...imageStyle,
+                border: changed ? "4px solid #d93025" : "1px solid #e0e3e8",
+                boxShadow: changed ? "0 0 0 4px rgba(217, 48, 37, 0.12)" : "none",
+              }}
+            />
+            {changed ? (
+              <figcaption style={{ marginTop: -8, color: "#b42318", fontSize: 13, fontWeight: 800 }}>
+                변경된 사진
+              </figcaption>
+            ) : null}
+          </figure>
+        );
+      })}
     </div>
   );
 }
 
-// ── 제목 좌우 비교 ────────────────────────────────────────
-function TitleDiff({ oldTitle, newTitle, vA, vB }: {
-  oldTitle: string; newTitle: string; vA: number; vB: number;
-}) {
-  const { oldTokens, newTokens } = wordDiff(oldTitle, newTitle);
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-      <div style={{ background: "#fff5f5", border: "1px solid #f5c6c6", borderRadius: 8, padding: 14 }}>
-        <div style={{ fontSize: 11, color: "#c0392b", fontWeight: 700, marginBottom: 8 }}>수정 전 (v{vA})</div>
-        <div style={{ fontSize: 15, lineHeight: 1.6 }}>{renderTokens(oldTokens)}</div>
-      </div>
-      <div style={{ background: "#fff5f5", border: "1px solid #f5c6c6", borderRadius: 8, padding: 14 }}>
-        <div style={{ fontSize: 11, color: "#c0392b", fontWeight: 700, marginBottom: 8 }}>수정 후 (v{vB})</div>
-        <div style={{ fontSize: 15, lineHeight: 1.6 }}>{renderTokens(newTokens)}</div>
-      </div>
-    </div>
-  );
-}
-
-// ── 메인 페이지 컴포넌트 ─────────────────────────────────
 export default function ArticlePage() {
   const { id } = useParams<{ id: string }>();
   const searchParams = useSearchParams();
@@ -218,154 +479,100 @@ export default function ArticlePage() {
 
   useEffect(() => {
     if (!id) return;
-    (async () => {
+
+    async function loadArticle() {
       setLoading(true);
-      const [artRes, verRes] = await Promise.all([
+      const [articleResult, versionResult] = await Promise.all([
         supabase.from("articles").select("*").eq("id", id).single(),
         supabase.from("article_versions").select("*").eq("article_id", id).order("version", { ascending: true }),
       ]);
-      if (artRes.data) setArticle(artRes.data);
-      if (verRes.data) {
-        setVersions(verRes.data);
-        const fromV = Number(searchParams.get("from"));
-        const toV   = Number(searchParams.get("to"));
-        const vers  = verRes.data;
-        if (fromV && toV) {
-          setVersionA(fromV);
-          setVersionB(toV);
-        } else if (vers.length >= 2) {
-          setVersionA(vers[vers.length - 2].version);
-          setVersionB(vers[vers.length - 1].version);
-        } else if (vers.length === 1) {
-          setVersionA(vers[0].version);
-          setVersionB(vers[0].version);
+
+      if (articleResult.data) setArticle(articleResult.data);
+      if (versionResult.data) {
+        const loadedVersions = versionResult.data as Version[];
+        setVersions(loadedVersions);
+
+        const fromVersion = Number(searchParams.get("from"));
+        const toVersion = Number(searchParams.get("to"));
+        if (fromVersion && toVersion) {
+          setVersionA(fromVersion);
+          setVersionB(toVersion);
+        } else if (loadedVersions.length >= 2) {
+          setVersionA(loadedVersions[loadedVersions.length - 2].version);
+          setVersionB(loadedVersions[loadedVersions.length - 1].version);
+        } else if (loadedVersions.length === 1) {
+          setVersionA(loadedVersions[0].version);
+          setVersionB(loadedVersions[0].version);
         }
       }
       setLoading(false);
-    })();
+    }
+
+    loadArticle();
   }, [id, searchParams]);
 
-  const verA = versions.find(v => v.version === vA);
-  const verB = versions.find(v => v.version === vB);
-  const titleChanged = verA && verB && verA.title !== verB.title;
-  const bodyChanged  = verA && verB && verA.content_plain !== verB.content_plain;
-  const imageChanged = verA && verB && imagesReallyChanged(
-    verA.image_hashes || [], verB.image_hashes || [],
-    verA.image_urls   || [], verB.image_urls   || [],
+  const beforeVersion = versions.find((version) => version.version === vA);
+  const afterVersion = versions.find((version) => version.version === vB);
+  const diffRows = useMemo(
+    () => paragraphDiff(beforeVersion?.content_plain || "", afterVersion?.content_plain || ""),
+    [beforeVersion?.content_plain, afterVersion?.content_plain]
+  );
+  const changedImages = useMemo(
+    () => changedImageIndexes(beforeVersion?.image_hashes || [], afterVersion?.image_hashes || []),
+    [beforeVersion?.image_hashes, afterVersion?.image_hashes]
   );
 
-  if (loading) return (
-    <div style={{ textAlign: "center", marginTop: 100, color: "#999" }}>로딩 중...</div>
-  );
-  if (!article) return (
-    <div style={{ textAlign: "center", marginTop: 100, color: "#999" }}>기사를 찾을 수 없습니다</div>
-  );
+  if (loading) {
+    return <div style={{ ...pageStyle, textAlign: "center", paddingTop: 100, color: "#7b8491" }}>로딩 중...</div>;
+  }
+
+  if (!article || !beforeVersion || !afterVersion) {
+    return <div style={{ ...pageStyle, textAlign: "center", paddingTop: 100, color: "#7b8491" }}>기사를 찾을 수 없습니다.</div>;
+  }
 
   return (
-    <div style={{ maxWidth: 1200, margin: "0 auto", padding: "24px 16px" }}>
-      {/* 뒤로가기 */}
-      <button
-        onClick={() => router.back()}
-        style={{ background: "none", border: "none", cursor: "pointer", color: "#1a73e8", fontSize: 13, marginBottom: 16, padding: 0 }}>
-        ← 목록으로
-      </button>
-
-      {/* 기사 헤더 */}
-      <div style={{ background: "#fff", borderRadius: 10, padding: "16px 20px", marginBottom: 20, border: "1px solid #e0e0e0" }}>
-        <div style={{ fontSize: 16, fontWeight: 700, marginBottom: 6, lineHeight: 1.4 }}>
-          {verB?.title || verA?.title || "(제목 없음)"}
+    <main style={pageStyle}>
+      <div style={shellStyle}>
+        <div style={topBarStyle}>
+          <button onClick={() => router.back()} style={backButtonStyle}>
+            목록으로
+          </button>
+          <span style={{ color: "#69717d", fontSize: 13 }}>네이버 뉴스 형식 미리보기</span>
         </div>
-        <div style={{ fontSize: 12, color: "#666", display: "flex", gap: 12, flexWrap: "wrap" }}>
-          {article.press && <span>📰 {article.press}</span>}
-          {article.last_keyword && (
-            <span style={{ background: "#f0f0f0", padding: "1px 8px", borderRadius: 4 }}>
-              {article.last_keyword}
-            </span>
-          )}
-          <a href={article.url} target="_blank" rel="noreferrer" style={{ color: "#1a73e8" }}>
-            원문 보기 →
-          </a>
+
+        <div style={versionBarStyle}>
+          <VersionSelect label="수정 전" value={vA} versions={versions} onChange={setVersionA} />
+          <span style={{ color: "#69717d", fontWeight: 900 }}>→</span>
+          <VersionSelect label="수정 후" value={vB} versions={versions} onChange={setVersionB} />
+        </div>
+
+        <div className="articleCompareGrid" style={articleGridStyle}>
+          <ArticlePaper
+            article={article}
+            version={beforeVersion}
+            counterpart={afterVersion}
+            side="before"
+            diffRows={diffRows}
+            changedImages={changedImages}
+          />
+          <ArticlePaper
+            article={article}
+            version={afterVersion}
+            counterpart={beforeVersion}
+            side="after"
+            diffRows={diffRows}
+            changedImages={changedImages}
+          />
         </div>
       </div>
 
-      {/* 버전 선택 */}
-      <div style={{ background: "#f0f4ff", borderRadius: 8, padding: "10px 16px", marginBottom: 24, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-        <span style={{ fontWeight: 700, fontSize: 13 }}>비교 버전:</span>
-        <select
-          value={vA}
-          onChange={e => setVersionA(Number(e.target.value))}
-          style={{ padding: "4px 8px", borderRadius: 5, border: "1px solid #ccc", fontSize: 12 }}>
-          {versions.map(v => (
-            <option key={v.id} value={v.version}>
-              v{v.version} — {new Date(v.fetched_at).toLocaleString("ko-KR")}
-            </option>
-          ))}
-        </select>
-        <span style={{ fontWeight: 700 }}>↔</span>
-        <select
-          value={vB}
-          onChange={e => setVersionB(Number(e.target.value))}
-          style={{ padding: "4px 8px", borderRadius: 5, border: "1px solid #ccc", fontSize: 12 }}>
-          {versions.map(v => (
-            <option key={v.id} value={v.version}>
-              v{v.version} — {new Date(v.fetched_at).toLocaleString("ko-KR")}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {verA && verB && (
-        <>
-          {/* 제목 비교 */}
-          {titleChanged && (
-            <section style={{ background: "#fff", borderRadius: 10, padding: "16px 20px", marginBottom: 20, border: "1px solid #e0e0e0" }}>
-              <h3 style={{ margin: "0 0 14px", fontSize: 14, fontWeight: 700 }}>📌 제목 변경</h3>
-              <TitleDiff oldTitle={verA.title || ""} newTitle={verB.title || ""} vA={vA} vB={vB} />
-            </section>
-          )}
-
-          {/* 본문 비교 */}
-          <section style={{ background: "#fff", borderRadius: 10, padding: "16px 20px", marginBottom: 20, border: "1px solid #e0e0e0" }}>
-            <h3 style={{ margin: "0 0 14px", fontSize: 14, fontWeight: 700 }}>📝 본문 비교</h3>
-            {!bodyChanged ? (
-              <p style={{ color: "#999", fontSize: 13 }}>본문 변경 없음</p>
-            ) : (
-              <div style={{ maxHeight: 700, overflowY: "auto", border: "1px solid #eee", borderRadius: 8, padding: "14px 16px" }}>
-                <BodyDiff
-                  oldText={verA.content_plain || ""}
-                  newText={verB.content_plain || ""}
-                  vA={vA} vB={vB}
-                />
-              </div>
-            )}
-          </section>
-
-          {/* 사진 비교 */}
-          <section style={{ background: "#fff", borderRadius: 10, padding: "16px 20px", marginBottom: 20, border: "1px solid #e0e0e0" }}>
-            <h3 style={{ margin: "0 0 14px", fontSize: 14, fontWeight: 700 }}>🖼️ 사진 비교</h3>
-            {!imageChanged ? (
-              <p style={{ color: "#999", fontSize: 13 }}>사진 변경 없음</p>
-            ) : (
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-                <div>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#c0392b", marginBottom: 10 }}>수정 전 (v{vA})</div>
-                  {(verA.image_urls || []).map((img, i) => (
-                    <img key={i} src={img} alt="" style={{ width: "100%", borderRadius: 6, border: "1px solid #ddd", marginBottom: 8 }} />
-                  ))}
-                  {(verA.image_urls || []).length === 0 && <p style={{ color: "#999", fontSize: 13 }}>사진 없음</p>}
-                </div>
-                <div>
-                  <div style={{ fontSize: 12, fontWeight: 700, color: "#c0392b", marginBottom: 10 }}>수정 후 (v{vB})</div>
-                  {(verB.image_urls || []).map((img, i) => (
-                    <img key={i} src={img} alt="" style={{ width: "100%", borderRadius: 6, border: "1px solid #ddd", marginBottom: 8 }} />
-                  ))}
-                  {(verB.image_urls || []).length === 0 && <p style={{ color: "#999", fontSize: 13 }}>사진 없음</p>}
-                </div>
-              </div>
-            )}
-          </section>
-        </>
-      )}
-    </div>
+      <style jsx global>{`
+        @media (max-width: 980px) {
+          .articleCompareGrid {
+            grid-template-columns: 1fr !important;
+          }
+        }
+      `}</style>
+    </main>
   );
 }
