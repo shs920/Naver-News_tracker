@@ -24,8 +24,22 @@ def utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def select_keywords_for_run(keywords: list[str], max_keywords_per_run: int) -> list[str]:
-    """Rotate keyword groups so scheduled runs finish before the next run starts."""
+def select_keywords_for_run(
+    keywords: list[str],
+    max_keywords_per_run: int,
+    group_index: int = 0,
+    group_count: int = 1,
+) -> list[str]:
+    """Select a deterministic keyword shard for this crawler job."""
+    if group_count > 1:
+        normalized_index = group_index % group_count
+        selected = [
+            keyword
+            for index, keyword in enumerate(keywords)
+            if index % group_count == normalized_index
+        ]
+        return selected[:max_keywords_per_run] if max_keywords_per_run > 0 else selected
+
     if max_keywords_per_run <= 0 or max_keywords_per_run >= len(keywords):
         return keywords
 
@@ -228,12 +242,19 @@ def main() -> None:
         print("No active keywords found.")
         return
 
-    keywords = select_keywords_for_run(all_keywords, settings.max_keywords_per_run)
+    keywords = select_keywords_for_run(
+        all_keywords,
+        settings.max_keywords_per_run,
+        settings.keyword_group_index,
+        settings.keyword_group_count,
+    )
     print(
         f"키워드 {len(keywords)}/{len(all_keywords)}개 처리 시작 "
-        f"(MAX_KEYWORDS_PER_RUN={settings.max_keywords_per_run}): "
+        f"(group={settings.keyword_group_index + 1}/{settings.keyword_group_count}, "
+        f"MAX_KEYWORDS_PER_RUN={settings.max_keywords_per_run}): "
         f"{', '.join(keywords)}"
     )
+    fallback_keyword = keywords[0] if keywords else all_keywords[0]
 
     total_new = 0
     total_changed = 0
@@ -246,13 +267,14 @@ def main() -> None:
 
         for result in results:
             try:
-                if not filter_by_relevance(
-                    keyword,
-                    result.title,
-                    getattr(result, "description", None),
-                ):
-                    total_skipped += 1
-                    continue
+                if settings.prefilter_search_results:
+                    if not filter_by_relevance(
+                        keyword,
+                        result.title,
+                        getattr(result, "description", None),
+                    ):
+                        total_skipped += 1
+                        continue
                 normalized_url = process_result(
                     db, keyword, result.url, result.press, result.title, settings
                 )
@@ -268,13 +290,17 @@ def main() -> None:
     # ── Recheck: 최근 기사 우선 재확인 ──────────────────────
     print(f"\n[RECHECK] 기존 기사 재확인 (최대 {settings.max_recheck_articles}개)")
     rechecked = 0
-    for article in db.list_articles_for_recheck(settings.max_recheck_articles):
+    for article in db.list_articles_for_recheck(
+        settings.max_recheck_articles,
+        settings.keyword_group_index,
+        settings.keyword_group_count,
+    ):
         if article["normalized_url"] in processed_urls:
             continue
         try:
             normalized_url = process_result(
                 db,
-                article.get("last_keyword") or keywords[0],
+                article.get("last_keyword") or fallback_keyword,
                 article["url"],
                 article.get("press"),
                 None,

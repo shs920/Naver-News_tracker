@@ -53,17 +53,25 @@ class NewsTrackerDB:
         )
         return (result.data or [None])[0]
 
-    def list_articles_for_recheck(self, limit: int) -> list[dict[str, Any]]:
-        # 최근에 수집된 기사를 우선 재확인 (last_seen_at 내림차순)
+    def list_articles_for_recheck(
+        self,
+        limit: int,
+        group_index: int = 0,
+        group_count: int = 1,
+    ) -> list[dict[str, Any]]:
+        fetch_limit = limit * max(1, group_count)
         result = (
             self.client.table("articles")
             .select("id,url,normalized_url,press,last_keyword,last_seen_at")
             .eq("is_deleted", False)
             .order("last_seen_at", desc=True)
-            .limit(limit)
+            .limit(fetch_limit)
             .execute()
         )
-        return result.data or []
+        rows = result.data or []
+        if group_count <= 1:
+            return rows[:limit]
+        return rows[group_index::group_count][:limit]
 
     def create_article(self, article: dict[str, Any]) -> dict[str, Any]:
         result = self.client.table("articles").insert(article).execute()

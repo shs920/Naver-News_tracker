@@ -7,12 +7,17 @@ on:
 
 concurrency:
   group: news-crawler
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   crawl:
     runs-on: ubuntu-latest
     timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        group: [0, 1, 2, 3]
 
     steps:
       - name: Checkout
@@ -35,8 +40,11 @@ jobs:
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
           SEED_KEYWORDS: "빙그레,삼양식품,농심,CJ제일제당,오뚜기,오리온,롯데웰푸드,롯데칠성,대상,대상웰라이프,동원F&B,매일유업,남양유업,서울우유,하림,삼립,해태,hy,하이트진로,오비맥주,BBQ,BHC,교촌"
-          MAX_KEYWORDS_PER_RUN: "8"
+          KEYWORD_GROUP_INDEX: ${{ matrix.group }}
+          KEYWORD_GROUP_COUNT: "4"
+          MAX_KEYWORDS_PER_RUN: "0"
           MAX_RESULTS_PER_KEYWORD: "100"
-          MAX_RECHECK_ARTICLES: "160"
+          MAX_RECHECK_ARTICLES: "60"
+          PREFILTER_SEARCH_RESULTS: "false"
           REQUEST_TIMEOUT: "10"
         run: python crawler/main.py

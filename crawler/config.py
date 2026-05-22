@@ -23,6 +23,9 @@ class Settings:
     max_search_pages: int = 1
     max_recheck_articles: int = 80
     max_keywords_per_run: int = 0
+    keyword_group_index: int = 0
+    keyword_group_count: int = 1
+    prefilter_search_results: bool = False
     seed_keywords: tuple[str, ...] = ()
     user_agent: str = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -50,6 +53,12 @@ def get_settings() -> Settings:
             "Create Naver Search API credentials at https://developers.naver.com."
         )
 
+    def env_bool(name: str, default: bool = False) -> bool:
+        value = os.environ.get(name)
+        if value is None:
+            return default
+        return value.strip().lower() in {"1", "true", "yes", "y", "on"}
+
     return Settings(
         supabase_url=supabase_url,
         supabase_key=supabase_key,
@@ -60,6 +69,9 @@ def get_settings() -> Settings:
         max_search_pages=int(os.environ.get("MAX_SEARCH_PAGES", "1")),
         max_recheck_articles=int(os.environ.get("MAX_RECHECK_ARTICLES", "80")),
         max_keywords_per_run=int(os.environ.get("MAX_KEYWORDS_PER_RUN", "0")),
+        keyword_group_index=int(os.environ.get("KEYWORD_GROUP_INDEX", "0")),
+        keyword_group_count=max(1, int(os.environ.get("KEYWORD_GROUP_COUNT", "1"))),
+        prefilter_search_results=env_bool("PREFILTER_SEARCH_RESULTS", False),
         seed_keywords=tuple(
             keyword.strip()
             for keyword in os.environ.get("SEED_KEYWORDS", DEFAULT_SEED_KEYWORDS).split(",")
