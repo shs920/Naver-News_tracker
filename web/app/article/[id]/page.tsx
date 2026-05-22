@@ -24,7 +24,8 @@ interface Article {
   is_deleted: boolean;
 }
 
-type Token = { text: string; changed: boolean };
+type HighlightTone = "before" | "after";
+type DiffToken = { text: string; changed: boolean };
 type DiffRow = {
   type: "same" | "add" | "delete" | "change";
   before?: string;
@@ -146,7 +147,16 @@ const imageStyle: CSSProperties = {
   margin: "0 0 18px",
 };
 
-const changedStyle: CSSProperties = {
+const beforeHighlightStyle: CSSProperties = {
+  background: "#dbeafe",
+  color: "#1d4ed8",
+  fontWeight: 800,
+  borderRadius: 3,
+  boxShadow: "0 0 0 1px rgba(37, 99, 235, 0.14)",
+  padding: "0 2px",
+};
+
+const afterHighlightStyle: CSSProperties = {
   background: "#ffe0de",
   color: "#a3120a",
   fontWeight: 800,
@@ -155,12 +165,12 @@ const changedStyle: CSSProperties = {
   padding: "0 2px",
 };
 
-const changedBlockStyle: CSSProperties = {
+const deletedNoteStyle: CSSProperties = {
   ...paragraphStyle,
-  background: "#fff0ef",
-  borderLeft: "4px solid #d93025",
+  borderLeft: "3px solid #93c5fd",
+  background: "#f4f8ff",
   borderRadius: 5,
-  color: "#3a1d1b",
+  color: "#475569",
   padding: "8px 10px",
 };
 
@@ -209,7 +219,7 @@ function changedImageIndexes(beforeHashes: string[], afterHashes: string[], thre
 function normalizeText(text: string): string {
   return (text || "")
     .toLowerCase()
-    .replace(/[\s"'“”‘’.,!?;:()[\]{}<>·ㆍ…]+/g, "")
+    .replace(/[\s"'""''.,!?;:()[\]{}<>·ㆍ\-_/\\|~`+=*&^%$#@]+/g, "")
     .trim();
 }
 
@@ -269,7 +279,7 @@ function paragraphDiff(beforeText: string | null, afterText: string | null): Dif
   for (let index = 0; index < raw.length; index++) {
     const current = raw[index];
     const next = raw[index + 1];
-    if (current.type === "delete" && next?.type === "add" && similarity(current.before || "", next.after || "") >= 0.45) {
+    if (current.type === "delete" && next?.type === "add" && similarity(current.before || "", next.after || "") >= 0.35) {
       merged.push({ type: "change", before: current.before, after: next.after });
       index++;
     } else {
@@ -279,39 +289,54 @@ function paragraphDiff(beforeText: string | null, afterText: string | null): Dif
   return merged;
 }
 
-function wordDiff(beforeText: string, afterText: string): Token[] {
-  const before = beforeText.split(/(\s+)/);
-  const after = afterText.split(/(\s+)/);
+function splitTokens(text: string): string[] {
+  return text.match(/\s+|[^\s]+/g) || [];
+}
+
+function tokenKey(token: string): string {
+  const normalized = normalizeText(token);
+  return normalized || token;
+}
+
+function pairedTokenDiff(beforeText: string, afterText: string): { beforeTokens: DiffToken[]; afterTokens: DiffToken[] } {
+  const before = splitTokens(beforeText);
+  const after = splitTokens(afterText);
   const dp = Array.from({ length: before.length + 1 }, () => new Array(after.length + 1).fill(0));
 
   for (let i = 1; i <= before.length; i++) {
     for (let j = 1; j <= after.length; j++) {
-      dp[i][j] = before[i - 1] === after[j - 1] ? dp[i - 1][j - 1] + 1 : Math.max(dp[i - 1][j], dp[i][j - 1]);
+      dp[i][j] = tokenKey(before[i - 1]) === tokenKey(after[j - 1]) ? dp[i - 1][j - 1] + 1 : Math.max(dp[i - 1][j], dp[i][j - 1]);
     }
   }
 
-  const tokens: Token[] = [];
+  const beforeTokens: DiffToken[] = [];
+  const afterTokens: DiffToken[] = [];
   let i = before.length;
   let j = after.length;
+
   while (i > 0 || j > 0) {
-    if (i > 0 && j > 0 && before[i - 1] === after[j - 1]) {
-      tokens.unshift({ text: after[j - 1], changed: false });
+    if (i > 0 && j > 0 && tokenKey(before[i - 1]) === tokenKey(after[j - 1])) {
+      beforeTokens.unshift({ text: before[i - 1], changed: false });
+      afterTokens.unshift({ text: after[j - 1], changed: false });
       i--;
       j--;
     } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-      tokens.unshift({ text: after[j - 1], changed: after[j - 1].trim().length > 0 });
+      afterTokens.unshift({ text: after[j - 1], changed: after[j - 1].trim().length > 0 });
       j--;
     } else {
+      beforeTokens.unshift({ text: before[i - 1], changed: before[i - 1].trim().length > 0 });
       i--;
     }
   }
-  return tokens;
+
+  return { beforeTokens, afterTokens };
 }
 
-function renderHighlightedTokens(tokens: Token[]): ReactNode {
+function renderHighlightedTokens(tokens: DiffToken[], tone: HighlightTone): ReactNode {
+  const style = tone === "before" ? beforeHighlightStyle : afterHighlightStyle;
   return tokens.map((token, index) =>
     token.changed ? (
-      <mark key={index} style={changedStyle}>
+      <mark key={index} style={style}>
         {token.text}
       </mark>
     ) : (
@@ -373,6 +398,7 @@ function ArticlePaper({
 }) {
   const isAfter = side === "after";
   const titleChanged = normalizeText(version.title || "") !== normalizeText(counterpart.title || "");
+  const titleTokens = titleChanged ? pairedTokenDiff(isAfter ? counterpart.title || "" : version.title || "", isAfter ? version.title || "" : counterpart.title || "") : null;
 
   return (
     <article style={articlePaperStyle}>
@@ -380,7 +406,9 @@ function ArticlePaper({
         <span style={labelStyle}>{isAfter ? `수정 후 v${version.version}` : `수정 전 v${version.version}`}</span>
 
         <h1 style={headlineStyle}>
-          {isAfter && titleChanged ? renderHighlightedTokens(wordDiff(counterpart.title || "", version.title || "")) : version.title || "제목 없음"}
+          {titleTokens
+            ? renderHighlightedTokens(isAfter ? titleTokens.afterTokens : titleTokens.beforeTokens, isAfter ? "after" : "before")
+            : version.title || "제목 없음"}
         </h1>
 
         <div style={metaStyle}>
@@ -396,7 +424,23 @@ function ArticlePaper({
           <ImageStrip urls={version.image_urls || []} changedImages={isAfter ? changedImages : new Set()} />
           {diffRows.map((row, index) => {
             if (!isAfter) {
-              if (row.type === "add") return <div key={index} style={{ height: 0 }} />;
+              if (row.type === "add") return null;
+              if (row.type === "change") {
+                const tokens = pairedTokenDiff(row.before || "", row.after || "").beforeTokens;
+                return (
+                  <p key={index} style={paragraphStyle}>
+                    {renderHighlightedTokens(tokens, "before")}
+                  </p>
+                );
+              }
+              if (row.type === "delete") {
+                return (
+                  <p key={index} style={paragraphStyle}>
+                    {renderHighlightedTokens([{ text: row.before || "", changed: true }], "before")}
+                    <span style={{ marginLeft: 8, color: "#64748b", fontSize: 13, fontWeight: 700 }}>삭제됨</span>
+                  </p>
+                );
+              }
               return (
                 <p key={index} style={paragraphStyle}>
                   {row.before}
@@ -412,22 +456,24 @@ function ArticlePaper({
               );
             }
             if (row.type === "change") {
+              const tokens = pairedTokenDiff(row.before || "", row.after || "").afterTokens;
               return (
-                <p key={index} style={changedBlockStyle}>
-                  {renderHighlightedTokens(wordDiff(row.before || "", row.after || ""))}
+                <p key={index} style={paragraphStyle}>
+                  {renderHighlightedTokens(tokens, "after")}
                 </p>
               );
             }
             if (row.type === "add") {
               return (
-                <p key={index} style={changedBlockStyle}>
-                  <mark style={changedStyle}>{row.after}</mark>
+                <p key={index} style={paragraphStyle}>
+                  {renderHighlightedTokens([{ text: row.after || "", changed: true }], "after")}
                 </p>
               );
             }
             return (
-              <p key={index} style={{ ...changedBlockStyle, opacity: 0.78 }}>
-                삭제된 문단
+              <p key={index} style={deletedNoteStyle}>
+                <strong style={{ color: "#1d4ed8", marginRight: 6 }}>삭제된 문단</strong>
+                {row.before}
               </p>
             );
           })}
