@@ -21,6 +21,17 @@ class NewsTrackerDB:
         )
         return sorted({row["keyword"] for row in (result.data or []) if row.get("keyword")})
 
+    def ensure_keywords(self, keywords: list[str] | tuple[str, ...]) -> None:
+        unique_keywords = sorted({keyword.strip() for keyword in keywords if keyword and keyword.strip()})
+        if not unique_keywords:
+            return
+
+        self.client.table("keywords").upsert(
+            [{"keyword": keyword, "is_active": True} for keyword in unique_keywords],
+            on_conflict="keyword",
+            ignore_duplicates=True,
+        ).execute()
+
     def get_article_by_normalized_url(self, normalized_url: str) -> dict[str, Any] | None:
         result = (
             self.client.table("articles")

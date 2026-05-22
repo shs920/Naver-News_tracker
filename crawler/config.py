@@ -5,6 +5,12 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+DEFAULT_SEED_KEYWORDS = (
+    "빙그레,삼양식품,농심,CJ제일제당,오뚜기,오리온,롯데웰푸드,롯데칠성,"
+    "대상,대상웰라이프,동원F&B,매일유업,남양유업,서울우유,하림,삼립,"
+    "해태,hy,하이트진로,오비맥주,BBQ,BHC,교촌"
+)
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -17,6 +23,7 @@ class Settings:
     max_search_pages: int = 1
     max_recheck_articles: int = 80
     max_keywords_per_run: int = 0
+    seed_keywords: tuple[str, ...] = ()
     user_agent: str = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -53,6 +60,11 @@ def get_settings() -> Settings:
         max_search_pages=int(os.environ.get("MAX_SEARCH_PAGES", "1")),
         max_recheck_articles=int(os.environ.get("MAX_RECHECK_ARTICLES", "80")),
         max_keywords_per_run=int(os.environ.get("MAX_KEYWORDS_PER_RUN", "0")),
+        seed_keywords=tuple(
+            keyword.strip()
+            for keyword in os.environ.get("SEED_KEYWORDS", DEFAULT_SEED_KEYWORDS).split(",")
+            if keyword.strip()
+        ),
         title_ratio_threshold=float(os.environ.get("TITLE_RATIO_THRESHOLD", "0.08")),
         body_ratio_threshold=float(os.environ.get("BODY_RATIO_THRESHOLD", "0.05")),
         image_ratio_threshold=float(os.environ.get("IMAGE_RATIO_THRESHOLD", "0.20")),

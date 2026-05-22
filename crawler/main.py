@@ -29,9 +29,9 @@ def select_keywords_for_run(keywords: list[str], max_keywords_per_run: int) -> l
     if max_keywords_per_run <= 0 or max_keywords_per_run >= len(keywords):
         return keywords
 
-    # GitHub Actions runs every 15 minutes. Advancing one slot per run covers all
+    # GitHub Actions runs every 5 minutes. Advancing one slot per run covers all
     # keywords over several runs without repeatedly timing out on the full set.
-    slot = int(datetime.now(timezone.utc).timestamp() // (15 * 60))
+    slot = int(datetime.now(timezone.utc).timestamp() // (5 * 60))
     start = (slot * max_keywords_per_run) % len(keywords)
     selected = keywords[start:start + max_keywords_per_run]
     if len(selected) < max_keywords_per_run:
@@ -221,6 +221,7 @@ def process_result(
 def main() -> None:
     settings = get_settings()
     db = NewsTrackerDB(settings)
+    db.ensure_keywords(settings.seed_keywords)
     all_keywords = db.get_active_keywords()
 
     if not all_keywords:
