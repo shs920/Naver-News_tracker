@@ -245,6 +245,55 @@ function splitParagraphs(text: string | null): string[] {
     .filter(Boolean);
 }
 
+function mergeChangedParagraphRuns(rows: DiffRow[]): DiffRow[] {
+  const merged: DiffRow[] = [];
+
+  for (let index = 0; index < rows.length; ) {
+    if (rows[index].type === "same") {
+      merged.push(rows[index]);
+      index++;
+      continue;
+    }
+
+    const run: DiffRow[] = [];
+    while (index < rows.length && rows[index].type !== "same") {
+      run.push(rows[index]);
+      index++;
+    }
+
+    const deletes = run.filter((row) => row.type === "delete");
+    const adds = run.filter((row) => row.type === "add");
+    const usedAdds = new Set<number>();
+
+    deletes.forEach((deleted) => {
+      let bestIndex = -1;
+      let bestScore = 0;
+
+      adds.forEach((added, addIndex) => {
+        if (usedAdds.has(addIndex)) return;
+        const score = similarity(deleted.before || "", added.after || "");
+        if (score > bestScore) {
+          bestScore = score;
+          bestIndex = addIndex;
+        }
+      });
+
+      if (bestIndex >= 0 && bestScore >= 0.22) {
+        usedAdds.add(bestIndex);
+        merged.push({ type: "change", before: deleted.before, after: adds[bestIndex].after });
+      } else {
+        merged.push(deleted);
+      }
+    });
+
+    adds.forEach((added, addIndex) => {
+      if (!usedAdds.has(addIndex)) merged.push(added);
+    });
+  }
+
+  return merged;
+}
+
 function paragraphDiff(beforeText: string | null, afterText: string | null): DiffRow[] {
   const before = splitParagraphs(beforeText);
   const after = splitParagraphs(afterText);
@@ -275,27 +324,40 @@ function paragraphDiff(beforeText: string | null, afterText: string | null): Dif
     }
   }
 
-  const merged: DiffRow[] = [];
-  for (let index = 0; index < raw.length; index++) {
-    const current = raw[index];
-    const next = raw[index + 1];
-    if (current.type === "delete" && next?.type === "add" && similarity(current.before || "", next.after || "") >= 0.35) {
-      merged.push({ type: "change", before: current.before, after: next.after });
-      index++;
-    } else {
-      merged.push(current);
-    }
-  }
-  return merged;
+  return mergeChangedParagraphRuns(raw);
 }
 
 function splitTokens(text: string): string[] {
-  return text.match(/\s+|[^\s]+/g) || [];
+  return Array.from(text);
 }
 
 function tokenKey(token: string): string {
-  const normalized = normalizeText(token);
-  return normalized || token;
+  return token;
+}
+
+function isWordChar(char: string | undefined): boolean {
+  return !!char && /[0-9A-Za-z가-힣]/.test(char);
+}
+
+function markWordRun(tokens: DiffToken[], index: number): void {
+  if (!tokens[index] || !isWordChar(tokens[index].text)) return;
+
+  let start = index;
+  let end = index;
+  while (start > 0 && isWordChar(tokens[start - 1].text)) start--;
+  while (end + 1 < tokens.length && isWordChar(tokens[end + 1].text)) end++;
+
+  for (let cursor = start; cursor <= end; cursor++) {
+    tokens[cursor].changed = true;
+  }
+}
+
+function expandOwnChangedWords(tokens: DiffToken[]): void {
+  const changedIndexes = tokens
+    .map((token, index) => (token.changed && isWordChar(token.text) ? index : -1))
+    .filter((index) => index >= 0);
+
+  changedIndexes.forEach((index) => markWordRun(tokens, index));
 }
 
 function pairedTokenDiff(beforeText: string, afterText: string): { beforeTokens: DiffToken[]; afterTokens: DiffToken[] } {
@@ -309,25 +371,62 @@ function pairedTokenDiff(beforeText: string, afterText: string): { beforeTokens:
     }
   }
 
-  const beforeTokens: DiffToken[] = [];
-  const afterTokens: DiffToken[] = [];
+  const ops: Array<{ type: "same" | "add" | "delete"; beforeIndex?: number; afterIndex?: number; insertAt?: number }> = [];
   let i = before.length;
   let j = after.length;
 
   while (i > 0 || j > 0) {
     if (i > 0 && j > 0 && tokenKey(before[i - 1]) === tokenKey(after[j - 1])) {
-      beforeTokens.unshift({ text: before[i - 1], changed: false });
-      afterTokens.unshift({ text: after[j - 1], changed: false });
+      ops.unshift({ type: "same", beforeIndex: i - 1, afterIndex: j - 1 });
       i--;
       j--;
     } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-      afterTokens.unshift({ text: after[j - 1], changed: after[j - 1].trim().length > 0 });
+      ops.unshift({ type: "add", afterIndex: j - 1, insertAt: i });
       j--;
     } else {
-      beforeTokens.unshift({ text: before[i - 1], changed: before[i - 1].trim().length > 0 });
+      ops.unshift({ type: "delete", beforeIndex: i - 1, insertAt: j });
       i--;
     }
   }
+
+  const beforeTokens = before.map((text) => ({ text, changed: false }));
+  const afterTokens = after.map((text) => ({ text, changed: false }));
+
+  for (let index = 0; index < ops.length; index++) {
+    const op = ops[index];
+    if (op.type === "delete" && op.beforeIndex !== undefined) {
+      beforeTokens[op.beforeIndex].changed = before[op.beforeIndex].trim().length > 0;
+    }
+    if (op.type !== "add") continue;
+
+    const insertAt = op.insertAt || 0;
+    const addedOps = [op];
+    while (ops[index + 1]?.type === "add" && ops[index + 1].insertAt === insertAt) {
+      addedOps.push(ops[index + 1]);
+      index++;
+    }
+
+    const addedText = addedOps.map((item) => after[item.afterIndex || 0]).join("");
+    addedOps.forEach((item) => {
+      if (item.afterIndex !== undefined) afterTokens[item.afterIndex].changed = after[item.afterIndex].trim().length > 0;
+    });
+
+    const isShortInsertion = addedText.trim().length <= 2 || /^\s+$/.test(addedText);
+    if (isShortInsertion && insertAt > 0 && insertAt < before.length && isWordChar(before[insertAt - 1]) && isWordChar(before[insertAt])) {
+      markWordRun(beforeTokens, insertAt - 1);
+      markWordRun(beforeTokens, insertAt);
+    }
+    if (/^\s+$/.test(addedText)) {
+      addedOps.forEach((item) => {
+        if (item.afterIndex === undefined) return;
+        markWordRun(afterTokens, item.afterIndex - 1);
+        markWordRun(afterTokens, item.afterIndex + 1);
+      });
+    }
+  }
+
+  expandOwnChangedWords(beforeTokens);
+  expandOwnChangedWords(afterTokens);
 
   return { beforeTokens, afterTokens };
 }
