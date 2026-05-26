@@ -165,6 +165,8 @@ def fetch_article(url: str, fallback_press: str | None, settings: Settings) -> P
         parse_quality = "failed"
 
     image_urls = _extract_images(BeautifulSoup(content_html or "", "html.parser"), final_url)
+    if not image_urls:
+        image_urls = _extract_meta_images(soup, final_url)
 
     return ParsedArticle(
         url=url,
@@ -481,6 +483,24 @@ def _extract_images(content_soup: BeautifulSoup, base_url: str) -> list[str]:
     return urls
 
 
+def _extract_meta_images(soup: BeautifulSoup, base_url: str) -> list[str]:
+    urls: list[str] = []
+    seen: set[str] = set()
+    for selector in (
+        "meta[property='og:image']",
+        "meta[name='twitter:image']",
+        "meta[property='twitter:image']",
+    ):
+        node = soup.select_one(selector)
+        if not node:
+            continue
+        url = urljoin(base_url, (node.get("content") or "").strip())
+        if _is_valid_article_image_url(url, seen):
+            seen.add(url)
+            urls.append(url)
+    return urls
+
+
 def _is_valid_article_image_url(url: str | None, seen: set[str]) -> bool:
     if not url or url.startswith("data:") or url in seen:
         return False
@@ -523,7 +543,6 @@ def _clean_article_plain(text: str | None) -> str | None:
 
 
 def _strip_inline_noise(line: str) -> str:
-    line = re.sub(r"[\w.+-]+@[\w.-]+\.\w+", "", line)
     line = re.sub(r"\s{2,}", " ", line)
     return line.strip()
 

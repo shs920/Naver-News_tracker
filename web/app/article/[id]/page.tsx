@@ -31,6 +31,11 @@ type DiffRow = {
   before?: string;
   after?: string;
 };
+type BodyParagraph = {
+  text: string;
+  type: "same" | "add" | "delete" | "change";
+  counterpart?: string;
+};
 
 const pageStyle: CSSProperties = {
   minHeight: "100vh",
@@ -327,6 +332,55 @@ function paragraphDiff(beforeText: string | null, afterText: string | null): Dif
   return mergeChangedParagraphRuns(raw);
 }
 
+function buildBodyDiff(beforeText: string | null, afterText: string | null): {
+  before: BodyParagraph[];
+  after: BodyParagraph[];
+} {
+  const before = splitParagraphs(beforeText);
+  const after = splitParagraphs(afterText);
+  const matches: Array<{ score: number; beforeIndex: number; afterIndex: number }> = [];
+
+  before.forEach((beforeParagraph, beforeIndex) => {
+    after.forEach((afterParagraph, afterIndex) => {
+      const score = similarity(beforeParagraph, afterParagraph);
+      if (score >= 0.35) {
+        matches.push({ score, beforeIndex, afterIndex });
+      }
+    });
+  });
+
+  matches.sort((left, right) => right.score - left.score);
+  const beforeMatches = new Map<number, { afterIndex: number; score: number }>();
+  const afterMatches = new Map<number, { beforeIndex: number; score: number }>();
+
+  matches.forEach((match) => {
+    if (beforeMatches.has(match.beforeIndex) || afterMatches.has(match.afterIndex)) return;
+    beforeMatches.set(match.beforeIndex, { afterIndex: match.afterIndex, score: match.score });
+    afterMatches.set(match.afterIndex, { beforeIndex: match.beforeIndex, score: match.score });
+  });
+
+  return {
+    before: before.map((text, index) => {
+      const match = beforeMatches.get(index);
+      if (!match) return { text, type: "delete" };
+      return {
+        text,
+        type: match.score >= 0.995 ? "same" : "change",
+        counterpart: after[match.afterIndex],
+      };
+    }),
+    after: after.map((text, index) => {
+      const match = afterMatches.get(index);
+      if (!match) return { text, type: "add" };
+      return {
+        text,
+        type: match.score >= 0.995 ? "same" : "change",
+        counterpart: before[match.beforeIndex],
+      };
+    }),
+  };
+}
+
 function splitTokens(text: string): string[] {
   return Array.from(text);
 }
@@ -485,14 +539,14 @@ function ArticlePaper({
   version,
   counterpart,
   side,
-  diffRows,
+  bodyParagraphs,
   changedImages,
 }: {
   article: Article;
   version: Version;
   counterpart: Version;
   side: "before" | "after";
-  diffRows: DiffRow[];
+  bodyParagraphs: BodyParagraph[];
   changedImages: Set<number>;
 }) {
   const isAfter = side === "after";
@@ -521,58 +575,38 @@ function ArticlePaper({
 
         <div style={bodyStyle}>
           <ImageStrip urls={version.image_urls || []} changedImages={isAfter ? changedImages : new Set()} />
-          {diffRows.map((row, index) => {
-            if (!isAfter) {
-              if (row.type === "add") return null;
-              if (row.type === "change") {
-                const tokens = pairedTokenDiff(row.before || "", row.after || "").beforeTokens;
-                return (
-                  <p key={index} style={paragraphStyle}>
-                    {renderHighlightedTokens(tokens, "before")}
-                  </p>
-                );
-              }
-              if (row.type === "delete") {
-                return (
-                  <p key={index} style={paragraphStyle}>
-                    {renderHighlightedTokens([{ text: row.before || "", changed: true }], "before")}
-                    <span style={{ marginLeft: 8, color: "#64748b", fontSize: 13, fontWeight: 700 }}>삭제됨</span>
-                  </p>
-                );
-              }
+          {bodyParagraphs.map((paragraph, index) => {
+            if (paragraph.type === "same") {
               return (
                 <p key={index} style={paragraphStyle}>
-                  {row.before}
+                  {paragraph.text}
                 </p>
               );
             }
-
-            if (row.type === "same") {
+            if (paragraph.type === "change") {
+              const tokens = pairedTokenDiff(
+                isAfter ? paragraph.counterpart || "" : paragraph.text,
+                isAfter ? paragraph.text : paragraph.counterpart || ""
+              );
               return (
                 <p key={index} style={paragraphStyle}>
-                  {row.after}
+                  {renderHighlightedTokens(isAfter ? tokens.afterTokens : tokens.beforeTokens, isAfter ? "after" : "before")}
                 </p>
               );
             }
-            if (row.type === "change") {
-              const tokens = pairedTokenDiff(row.before || "", row.after || "").afterTokens;
+            if (paragraph.type === "add") {
+              if (!isAfter) return null;
               return (
                 <p key={index} style={paragraphStyle}>
-                  {renderHighlightedTokens(tokens, "after")}
+                  {renderHighlightedTokens([{ text: paragraph.text, changed: true }], "after")}
                 </p>
               );
             }
-            if (row.type === "add") {
-              return (
-                <p key={index} style={paragraphStyle}>
-                  {renderHighlightedTokens([{ text: row.after || "", changed: true }], "after")}
-                </p>
-              );
-            }
+            if (isAfter) return null;
             return (
-              <p key={index} style={deletedNoteStyle}>
-                <strong style={{ color: "#1d4ed8", marginRight: 6 }}>삭제된 문단</strong>
-                {row.before}
+              <p key={index} style={paragraphStyle}>
+                {renderHighlightedTokens([{ text: paragraph.text, changed: true }], "before")}
+                <span style={{ marginLeft: 8, color: "#64748b", fontSize: 13, fontWeight: 700 }}>삭제됨</span>
               </p>
             );
           })}
@@ -658,8 +692,8 @@ export default function ArticlePage() {
 
   const beforeVersion = versions.find((version) => version.version === vA);
   const afterVersion = versions.find((version) => version.version === vB);
-  const diffRows = useMemo(
-    () => paragraphDiff(beforeVersion?.content_plain || "", afterVersion?.content_plain || ""),
+  const bodyDiff = useMemo(
+    () => buildBodyDiff(beforeVersion?.content_plain || "", afterVersion?.content_plain || ""),
     [beforeVersion?.content_plain, afterVersion?.content_plain]
   );
   const changedImages = useMemo(
@@ -697,7 +731,7 @@ export default function ArticlePage() {
             version={beforeVersion}
             counterpart={afterVersion}
             side="before"
-            diffRows={diffRows}
+            bodyParagraphs={bodyDiff.before}
             changedImages={changedImages}
           />
           <ArticlePaper
@@ -705,7 +739,7 @@ export default function ArticlePage() {
             version={afterVersion}
             counterpart={beforeVersion}
             side="after"
-            diffRows={diffRows}
+            bodyParagraphs={bodyDiff.after}
             changedImages={changedImages}
           />
         </div>

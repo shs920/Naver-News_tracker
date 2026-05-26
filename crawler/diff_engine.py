@@ -41,18 +41,40 @@ def body_change_ratio(before: str | None, after: str | None) -> float:
     if not before_paras or not after_paras:
         return 1.0
 
-    m, n = len(before_paras), len(after_paras)
-    dp = [[0] * (n + 1) for _ in range(m + 1)]
-    for i in range(1, m + 1):
-        for j in range(1, n + 1):
-            if before_paras[i - 1] == after_paras[j - 1]:
-                dp[i][j] = dp[i - 1][j - 1] + len(before_paras[i - 1])
-            else:
-                dp[i][j] = max(dp[i - 1][j], dp[i][j - 1])
+    pairs: list[tuple[float, int, int]] = []
+    for before_index, before_para in enumerate(before_paras):
+        for after_index, after_para in enumerate(after_paras):
+            ratio = SequenceMatcher(None, before_para, after_para).ratio()
+            if ratio >= 0.78:
+                pairs.append((ratio, before_index, after_index))
 
-    unchanged_chars = dp[m][n]
+    pairs.sort(reverse=True)
+    used_before: set[int] = set()
+    used_after: set[int] = set()
+    changed_chars = 0.0
+
+    for ratio, before_index, after_index in pairs:
+        if before_index in used_before or after_index in used_after:
+            continue
+        used_before.add(before_index)
+        used_after.add(after_index)
+        changed_chars += (1.0 - ratio) * max(
+            len(before_paras[before_index]),
+            len(after_paras[after_index]),
+        )
+
+    changed_chars += sum(
+        len(paragraph)
+        for index, paragraph in enumerate(before_paras)
+        if index not in used_before
+    )
+    changed_chars += sum(
+        len(paragraph)
+        for index, paragraph in enumerate(after_paras)
+        if index not in used_after
+    )
     total_chars = max(sum(map(len, before_paras)), sum(map(len, after_paras)), 1)
-    return 1.0 - (unchanged_chars / total_chars)
+    return min(1.0, changed_chars / total_chars)
 
 
 def split_normalized_paragraphs(value: str | None) -> list[str]:
