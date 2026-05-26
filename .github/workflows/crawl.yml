@@ -5,14 +5,20 @@ on:
     - cron: "*/5 * * * *"
   workflow_dispatch:
 
-concurrency:
-  group: news-crawler
-  cancel-in-progress: false
+env:
+  SEED_KEYWORDS: "빙그레,삼양식품,농심,CJ제일제당,오뚜기,오리온,롯데웰푸드,롯데칠성,대상,대상웰라이프,동원F&B,매일유업,남양유업,서울우유,하림,삼립,해태,hy,하이트진로,오비맥주,BBQ,BHC,교촌,스타벅스"
+  KEYWORD_GROUP_COUNT: "4"
+  PREFILTER_SEARCH_RESULTS: "false"
+  REQUEST_TIMEOUT: "10"
 
 jobs:
-  crawl:
+  discover:
+    name: discover-${{ matrix.group }}
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 10
+    concurrency:
+      group: news-crawler-discover-${{ matrix.group }}
+      cancel-in-progress: false
     strategy:
       fail-fast: false
       max-parallel: 4
@@ -33,18 +39,53 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r crawler/requirements.txt
 
-      - name: Run crawler
+      - name: Discover new articles
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
-          SEED_KEYWORDS: "빙그레,삼양식품,농심,CJ제일제당,오뚜기,오리온,롯데웰푸드,롯데칠성,대상,대상웰라이프,동원F&B,매일유업,남양유업,서울우유,하림,삼립,해태,hy,하이트진로,오비맥주,BBQ,BHC,교촌,스타벅스"
+          CRAWLER_MODE: "discover"
           KEYWORD_GROUP_INDEX: ${{ matrix.group }}
-          KEYWORD_GROUP_COUNT: "4"
           MAX_KEYWORDS_PER_RUN: "0"
           MAX_RESULTS_PER_KEYWORD: "100"
-          MAX_RECHECK_ARTICLES: "60"
-          PREFILTER_SEARCH_RESULTS: "false"
-          REQUEST_TIMEOUT: "10"
+        run: python crawler/main.py
+
+  recheck:
+    name: recheck-${{ matrix.group }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    concurrency:
+      group: news-crawler-recheck-${{ matrix.group }}
+      cancel-in-progress: false
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        group: [0, 1, 2, 3]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: crawler/requirements.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r crawler/requirements.txt
+
+      - name: Recheck tracked articles
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+          CRAWLER_MODE: "recheck"
+          KEYWORD_GROUP_INDEX: ${{ matrix.group }}
+          MAX_RECHECK_ARTICLES: "120"
+          RECHECK_CANDIDATE_POOL: "1200"
         run: python crawler/main.py

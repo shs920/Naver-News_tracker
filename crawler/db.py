@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from typing import Any
 
 from supabase import Client, create_client
@@ -58,20 +59,40 @@ class NewsTrackerDB:
         limit: int,
         group_index: int = 0,
         group_count: int = 1,
+        candidate_pool: int = 800,
     ) -> list[dict[str, Any]]:
-        fetch_limit = limit * max(1, group_count)
-        result = (
+        fetch_limit = max(limit * max(1, group_count) * 4, candidate_pool, 100)
+        columns = "id,url,normalized_url,press,last_keyword,first_seen_at,last_seen_at,current_version"
+        recent_result = (
             self.client.table("articles")
-            .select("id,url,normalized_url,press,last_keyword,last_seen_at")
+            .select(columns)
             .eq("is_deleted", False)
-            .order("last_seen_at", desc=True)
+            .order("first_seen_at", desc=True)
             .limit(fetch_limit)
             .execute()
         )
-        rows = result.data or []
+        stale_result = (
+            self.client.table("articles")
+            .select(columns)
+            .eq("is_deleted", False)
+            .order("last_seen_at", desc=False)
+            .limit(fetch_limit)
+            .execute()
+        )
+
+        by_id: dict[str, dict[str, Any]] = {}
+        for row in (recent_result.data or []) + (stale_result.data or []):
+            if row.get("id"):
+                by_id[row["id"]] = row
+
+        rows = list(by_id.values())
         if group_count <= 1:
-            return rows[:limit]
-        return rows[group_index::group_count][:limit]
+            return rows
+        normalized_index = group_index % group_count
+        return [
+            row for row in rows
+            if _stable_group(row.get("id", ""), group_count) == normalized_index
+        ]
 
     def create_article(self, article: dict[str, Any]) -> dict[str, Any]:
         result = self.client.table("articles").insert(article).execute()
@@ -86,3 +107,8 @@ class NewsTrackerDB:
 
     def create_change(self, change: dict[str, Any]) -> None:
         self.client.table("article_changes").insert(change).execute()
+
+
+def _stable_group(value: str, group_count: int) -> int:
+    digest = hashlib.sha1(value.encode("utf-8")).hexdigest()
+    return int(digest[:8], 16) % max(1, group_count)

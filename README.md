@@ -55,6 +55,8 @@ GitHub Actions Secrets 또는 로컬 `.env`에 설정합니다.
 | `REQUEST_TIMEOUT` | 아니오 | HTTP 요청 타임아웃 초. 기본값 `10` |
 | `MAX_RESULTS_PER_KEYWORD` | 아니오 | 키워드별 네이버 뉴스 검색 결과 조회 개수. 기본값 `100` |
 | `MAX_RECHECK_ARTICLES` | 아니오 | 기존 추적 기사 재확인 개수. 기본값 `80` |
+| `RECHECK_CANDIDATE_POOL` | 아니오 | 재확인 후보 풀 크기. 최근 기사와 오래 미확인 기사에서 후보를 뽑습니다. 기본값 `800` |
+| `CRAWLER_MODE` | 아니오 | `both`, `discover`, `recheck` 중 하나. GitHub Actions에서는 신규 기사 탐색과 기존 기사 재확인을 별도 job으로 실행합니다. 기본값 `both` |
 | `MAX_KEYWORDS_PER_RUN` | 아니오 | 1개 crawler job에서 처리할 최대 키워드 수. `0`이면 배정된 그룹 전체 처리. 기본값 `0` |
 | `KEYWORD_GROUP_INDEX` | 아니오 | 병렬 키워드 그룹 번호. GitHub Actions matrix에서 자동 설정 |
 | `KEYWORD_GROUP_COUNT` | 아니오 | 병렬 키워드 그룹 개수. GitHub Actions 기본값 `4` |
@@ -95,14 +97,22 @@ $env:SUPABASE_KEY="your-service-role-key"
 python crawler/main.py
 ```
 
+누락 후보를 점검하려면 프로젝트 루트에서 다음 스크립트를 실행합니다. `DIAG_KEYWORDS`를 생략하면 활성 키워드 전체를 검사합니다.
+
+```bash
+DIAG_KEYWORDS="빙그레,스타벅스" python scripts/diagnose_missing_articles.py
+```
+
 ## GitHub Actions 설정
 
 [.github/workflows/crawl.yml](.github/workflows/crawl.yml)은 다음 흐름으로 동작합니다.
 
-1. 10분마다 실행
-2. Python 3.11 설치
-3. `crawler/requirements.txt` 설치
-4. `python crawler/main.py` 실행
+1. 5분마다 실행
+2. 신규 기사 탐색(`CRAWLER_MODE=discover`)과 기존 기사 재확인(`CRAWLER_MODE=recheck`)을 별도 병렬 job으로 실행
+3. 각 job은 4개 그룹으로 나뉘어 키워드와 기사 후보를 분산 처리
+4. Python 3.11 설치
+5. `crawler/requirements.txt` 설치
+6. `python crawler/main.py` 실행
 
 GitHub 저장소의 `Settings > Secrets and variables > Actions`에 아래 Secrets를 추가합니다.
 

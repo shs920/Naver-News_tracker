@@ -53,6 +53,42 @@ def select_keywords_for_run(
     return selected
 
 
+def parse_utc_datetime(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+
+
+def recheck_interval_minutes(first_seen_at: str | None) -> int:
+    first_seen = parse_utc_datetime(first_seen_at)
+    if not first_seen:
+        return 30
+
+    age_minutes = (datetime.now(timezone.utc) - first_seen).total_seconds() / 60
+    if age_minutes <= 30:
+        return 0
+    if age_minutes <= 120:
+        return 10
+    if age_minutes <= 24 * 60:
+        return 30
+    if age_minutes <= 3 * 24 * 60:
+        return 120
+    return 360
+
+
+def should_recheck_article(article: dict[str, Any]) -> bool:
+    last_seen = parse_utc_datetime(article.get("last_seen_at"))
+    if not last_seen:
+        return True
+
+    interval = recheck_interval_minutes(article.get("first_seen_at"))
+    elapsed_minutes = (datetime.now(timezone.utc) - last_seen).total_seconds() / 60
+    return elapsed_minutes >= interval
+
+
 def version_payload(
     article_id: str,
     version: int,
@@ -232,71 +268,78 @@ def process_result(
     return parsed.normalized_url
 
 
-def main() -> None:
-    settings = get_settings()
-    db = NewsTrackerDB(settings)
-    db.ensure_keywords(settings.seed_keywords)
-    all_keywords = db.get_active_keywords()
-
-    if not all_keywords:
-        print("No active keywords found.")
-        return
-
-    keywords = select_keywords_for_run(
-        all_keywords,
-        settings.max_keywords_per_run,
-        settings.keyword_group_index,
-        settings.keyword_group_count,
-    )
+def run_discovery(
+    db: NewsTrackerDB,
+    keywords: list[str],
+    all_keywords: list[str],
+    settings,
+    processed_urls: set[str],
+) -> tuple[int, int]:
     print(
-        f"키워드 {len(keywords)}/{len(all_keywords)}개 처리 시작 "
-        f"(group={settings.keyword_group_index + 1}/{settings.keyword_group_count}, "
-        f"MAX_KEYWORDS_PER_RUN={settings.max_keywords_per_run}): "
+        f"DISCOVER keywords={len(keywords)}/{len(all_keywords)} "
+        f"group={settings.keyword_group_index + 1}/{settings.keyword_group_count} "
+        f"MAX_KEYWORDS_PER_RUN={settings.max_keywords_per_run}: "
         f"{', '.join(keywords)}"
     )
-    fallback_keyword = keywords[0] if keywords else all_keywords[0]
-
-    total_new = 0
-    total_changed = 0
-    total_skipped = 0
-    processed_urls: set[str] = set()
+    processed = 0
+    skipped = 0
 
     for keyword in keywords:
         results = search_naver_news(keyword, settings)
-        print(f"\n[{keyword}] 검색 결과: {len(results)}개")
+        print(f"\n[{keyword}] search results: {len(results)}")
 
         for result in results:
             try:
-                if settings.prefilter_search_results:
-                    if not filter_by_relevance(
-                        keyword,
-                        result.title,
-                        getattr(result, "description", None),
-                    ):
-                        total_skipped += 1
-                        continue
+                if settings.prefilter_search_results and not filter_by_relevance(
+                    keyword,
+                    result.title,
+                    getattr(result, "description", None),
+                ):
+                    skipped += 1
+                    continue
+
                 normalized_url = process_result(
                     db, keyword, result.url, result.press, result.title, settings
                 )
                 if normalized_url:
-                    if normalized_url not in processed_urls:
-                        total_new += 1
                     processed_urls.add(normalized_url)
+                    processed += 1
                 else:
-                    total_skipped += 1
+                    skipped += 1
             except Exception as exc:
                 print(f"  [ERROR] {result.url}: {exc}")
 
-    # ── Recheck: 최근 기사 우선 재확인 ──────────────────────
-    print(f"\n[RECHECK] 기존 기사 재확인 (최대 {settings.max_recheck_articles}개)")
+    return processed, skipped
+
+
+def run_recheck(
+    db: NewsTrackerDB,
+    fallback_keyword: str,
+    settings,
+    processed_urls: set[str],
+) -> int:
+    print(
+        f"\n[RECHECK] candidates={settings.recheck_candidate_pool}, "
+        f"limit={settings.max_recheck_articles}, "
+        f"group={settings.keyword_group_index + 1}/{settings.keyword_group_count}"
+    )
     rechecked = 0
+    skipped_not_due = 0
+
     for article in db.list_articles_for_recheck(
         settings.max_recheck_articles,
         settings.keyword_group_index,
         settings.keyword_group_count,
+        settings.recheck_candidate_pool,
     ):
+        if rechecked >= settings.max_recheck_articles:
+            break
         if article["normalized_url"] in processed_urls:
             continue
+        if not should_recheck_article(article):
+            skipped_not_due += 1
+            continue
+
         try:
             normalized_url = process_result(
                 db,
@@ -312,9 +355,46 @@ def main() -> None:
         except Exception as exc:
             print(f"  [RECHECK ERROR] {article['url']}: {exc}")
 
+    print(f"[RECHECK] done={rechecked}, skipped_not_due={skipped_not_due}")
+    return rechecked
+
+
+def main() -> None:
+    settings = get_settings()
+    mode = settings.crawler_mode
+    if mode not in {"both", "discover", "recheck"}:
+        raise RuntimeError("CRAWLER_MODE must be one of: both, discover, recheck")
+
+    db = NewsTrackerDB(settings)
+    db.ensure_keywords(settings.seed_keywords)
+    all_keywords = db.get_active_keywords()
+
+    if not all_keywords:
+        print("No active keywords found.")
+        return
+
+    keywords = select_keywords_for_run(
+        all_keywords,
+        settings.max_keywords_per_run,
+        settings.keyword_group_index,
+        settings.keyword_group_count,
+    )
+    fallback_keyword = keywords[0] if keywords else all_keywords[0]
+    processed_urls: set[str] = set()
+
+    discovered = 0
+    skipped = 0
+    rechecked = 0
+
+    if mode in {"both", "discover"}:
+        discovered, skipped = run_discovery(db, keywords, all_keywords, settings, processed_urls)
+
+    if mode in {"both", "recheck"}:
+        rechecked = run_recheck(db, fallback_keyword, settings, processed_urls)
+
     print(
-        f"\n완료: 처리={total_new}, skip={total_skipped}, "
-        f"recheck={rechecked}, 총={len(processed_urls)}"
+        f"\nDONE mode={mode}, discover_processed={discovered}, "
+        f"skip={skipped}, recheck={rechecked}, unique_urls={len(processed_urls)}"
     )
 
 
