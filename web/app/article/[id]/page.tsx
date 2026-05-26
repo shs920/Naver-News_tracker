@@ -221,8 +221,14 @@ function changedImageIndexes(beforeHashes: string[], afterHashes: string[], thre
   return changed;
 }
 
+const emailPattern = /[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g;
+
+function stripEmailAddresses(text: string): string {
+  return (text || "").replace(emailPattern, "");
+}
+
 function normalizeText(text: string): string {
-  return (text || "")
+  return stripEmailAddresses(text || "")
     .toLowerCase()
     .replace(/[\s"'""''.,!?;:()[\]{}<>·ㆍ\-_/\\|~`+=*&^%$#@]+/g, "")
     .trim();
@@ -414,6 +420,25 @@ function expandOwnChangedWords(tokens: DiffToken[]): void {
   changedIndexes.forEach((index) => markWordRun(tokens, index));
 }
 
+function emailCharacterIndexes(text: string): Set<number> {
+  const indexes = new Set<number>();
+  for (const match of text.matchAll(emailPattern)) {
+    const start = match.index || 0;
+    for (let index = start; index < start + match[0].length; index++) {
+      indexes.add(index);
+    }
+  }
+  return indexes;
+}
+
+function clearEmailHighlights(tokens: DiffToken[], text: string): void {
+  const emailIndexes = emailCharacterIndexes(text);
+  if (!emailIndexes.size) return;
+  tokens.forEach((token, index) => {
+    if (emailIndexes.has(index)) token.changed = false;
+  });
+}
+
 function pairedTokenDiff(beforeText: string, afterText: string): { beforeTokens: DiffToken[]; afterTokens: DiffToken[] } {
   const before = splitTokens(beforeText);
   const after = splitTokens(afterText);
@@ -481,6 +506,8 @@ function pairedTokenDiff(beforeText: string, afterText: string): { beforeTokens:
 
   expandOwnChangedWords(beforeTokens);
   expandOwnChangedWords(afterTokens);
+  clearEmailHighlights(beforeTokens, beforeText);
+  clearEmailHighlights(afterTokens, afterText);
 
   return { beforeTokens, afterTokens };
 }

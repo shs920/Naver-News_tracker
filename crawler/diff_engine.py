@@ -9,6 +9,8 @@ import re
 from difflib import SequenceMatcher
 from typing import Any
 
+EMAIL_PATTERN = re.compile(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b")
+
 
 def stable_hash(value: str | None) -> str | None:
     if value is None:
@@ -16,10 +18,17 @@ def stable_hash(value: str | None) -> str | None:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
 
 
+def strip_email_addresses(value: str | None) -> str:
+    if not value:
+        return ""
+    return EMAIL_PATTERN.sub("", value)
+
+
 def normalize_meaningful_text(value: str | None) -> str:
     """비교용 텍스트 정규화: 소문자, 공백/기호 제거."""
     if not value:
         return ""
+    value = strip_email_addresses(value)
     value = value.lower()
     value = re.sub(r'[\s\"\'""\u2018\u2019.,!?;:()\[\]{}<>\u00b7\u318d\u2026]+', "", value)
     return value.strip()
