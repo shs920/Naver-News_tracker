@@ -146,6 +146,10 @@ def process_result(
     # ── 4. Relevance filtering ────────────────────────────────
     effective_title = parsed.title or search_title
     if not filter_by_relevance(keyword, effective_title, parsed.content_plain):
+        existing = db.get_article_by_normalized_url(parsed.normalized_url)
+        if existing:
+            db.update_article(existing["id"], {"last_seen_at": utc_now_iso()})
+            print(f"  [SKIP-RELEVANCE-EXISTING] {keyword}: {(effective_title or '')[:50]}")
         return None
 
     # ── 5. 이미지 해시 계산 ──────────────────────────────────

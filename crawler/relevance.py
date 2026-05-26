@@ -64,6 +64,9 @@ def compute_relevance(
         if str(excl).casefold() in full_fold:
             score -= 20
 
+    if not alias_found:
+        return (score, False)
+
     # ── alias_only_pass 판단 ───────────────────────────────
     # alias_only_pass=True: alias만 발견돼도 required_context 없이 통과 가능
     # alias_only_pass=False: alias 발견 + context 점수 필요 (동음이의어 기업)
@@ -78,7 +81,7 @@ def compute_relevance(
         is_relevant = score >= MIN_RELEVANCE_SCORE
     else:
         # alias_only_pass=False면 alias + context 조합이 필요
-        is_relevant = score >= MIN_RELEVANCE_SCORE
+        is_relevant = alias_found and score >= MIN_RELEVANCE_SCORE
 
     return (score, is_relevant)
 
