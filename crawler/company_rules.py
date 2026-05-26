@@ -444,6 +444,21 @@ COMPANY_RULES: dict[str, dict] = {
         "exclude_keywords": [],
         "alias_only_pass": True,
     },
+
+    # ── 스타벅스 ───────────────────────────────────────────────
+    "스타벅스": {
+        "aliases": [
+            "스타벅스", "스타벅스코리아", "SCK컴퍼니",
+            "Starbucks", "스타벅스 리워드", "사이렌오더",
+        ],
+        "required_context": [
+            "커피", "카페", "음료", "매장", "리워드", "사이렌오더",
+            "프랜차이즈", "외식", "유통", "매출", "영업이익",
+            "분기", "실적", "신세계", "SCK",
+        ],
+        "exclude_keywords": [],
+        "alias_only_pass": True,
+    },
 }
 
 # 이 점수 이상이어야 기사 저장

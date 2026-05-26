@@ -120,5 +120,5 @@ insert into public.keywords (keyword) values
   ('풀무원'), ('동원F&B'), ('매일유업'),
   ('남양유업'), ('서울우유'), ('하림'), ('삼립'),
   ('해태'), ('hy'), ('하이트진로'),
-  ('오비맥주'), ('BBQ'), ('BHC'), ('교촌')
+  ('오비맥주'), ('BBQ'), ('BHC'), ('교촌'), ('스타벅스')
 on conflict (keyword) do nothing;

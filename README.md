@@ -41,7 +41,7 @@
 
 1. Supabase 프로젝트를 생성합니다.
 2. Supabase SQL Editor에서 [database/init.sql](database/init.sql)을 실행합니다.
-3. 기본 식품기업 키워드가 `keywords` 테이블에 등록됩니다. 현재 기본값에는 `삼립`도 포함됩니다.
+3. 기본 식품기업 키워드가 `keywords` 테이블에 등록됩니다. 현재 기본값에는 `삼립`, `스타벅스`도 포함됩니다.
 4. 키워드를 추가하려면 Supabase에서 `keywords.keyword`에 값을 추가하고 `is_active=true`로 둡니다.
 
 ## 크롤러 환경변수
@@ -59,7 +59,7 @@ GitHub Actions Secrets 또는 로컬 `.env`에 설정합니다.
 | `KEYWORD_GROUP_INDEX` | 아니오 | 병렬 키워드 그룹 번호. GitHub Actions matrix에서 자동 설정 |
 | `KEYWORD_GROUP_COUNT` | 아니오 | 병렬 키워드 그룹 개수. GitHub Actions 기본값 `4` |
 | `PREFILTER_SEARCH_RESULTS` | 아니오 | 원문 fetch 전 네이버 API 제목/요약만으로 사전 필터링할지 여부. 기본값 `false` |
-| `SEED_KEYWORDS` | 아니오 | 실행 시작 시 누락된 키워드를 자동 등록할 쉼표 구분 목록. 기본값에 `삼립` 포함 |
+| `SEED_KEYWORDS` | 아니오 | 실행 시작 시 누락된 키워드를 자동 등록할 쉼표 구분 목록. 기본값에 `삼립`, `스타벅스` 포함 |
 
 ## 크롤러 로컬 실행
 
