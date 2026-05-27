@@ -7,7 +7,6 @@ on:
 
 env:
   SEED_KEYWORDS: "빙그레,삼양식품,농심,CJ제일제당,오뚜기,오리온,롯데웰푸드,롯데칠성,대상,대상웰라이프,동원F&B,매일유업,남양유업,서울우유,하림,삼립,해태,hy,하이트진로,오비맥주,BBQ,BHC,교촌,스타벅스"
-  KEYWORD_GROUP_COUNT: "4"
   PREFILTER_SEARCH_RESULTS: "false"
   REQUEST_TIMEOUT: "10"
 
@@ -15,15 +14,15 @@ jobs:
   discover:
     name: discover-${{ matrix.group }}
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 15
     concurrency:
       group: news-crawler-discover-${{ matrix.group }}
       cancel-in-progress: false
     strategy:
       fail-fast: false
-      max-parallel: 4
+      max-parallel: 8
       matrix:
-        group: [0, 1, 2, 3]
+        group: [0, 1, 2, 3, 4, 5, 6, 7]
 
     steps:
       - name: Checkout
@@ -47,8 +46,9 @@ jobs:
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
           CRAWLER_MODE: "discover"
           KEYWORD_GROUP_INDEX: ${{ matrix.group }}
+          KEYWORD_GROUP_COUNT: "8"
           MAX_KEYWORDS_PER_RUN: "0"
-          MAX_RESULTS_PER_KEYWORD: "100"
+          MAX_RESULTS_PER_KEYWORD: "40"
         run: python crawler/main.py
 
   recheck:
@@ -86,6 +86,7 @@ jobs:
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
           CRAWLER_MODE: "recheck"
           KEYWORD_GROUP_INDEX: ${{ matrix.group }}
-          MAX_RECHECK_ARTICLES: "120"
+          KEYWORD_GROUP_COUNT: "4"
+          MAX_RECHECK_ARTICLES: "80"
           RECHECK_CANDIDATE_POOL: "1200"
         run: python crawler/main.py

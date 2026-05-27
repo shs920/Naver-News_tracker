@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from typing import Any
 
 from article_parser import ParsedArticle, fetch_article
+from article_parser import normalize_url as normalize_article_url
 from config import get_settings
 from db import NewsTrackerDB
 from diff_engine import detect_change, stable_hash
@@ -287,6 +288,7 @@ def run_discovery(
     )
     processed = 0
     skipped = 0
+    already_tracked = 0
 
     for keyword in keywords:
         results = search_naver_news(keyword, settings)
@@ -302,6 +304,12 @@ def run_discovery(
                     skipped += 1
                     continue
 
+                quick_normalized_url = normalize_article_url(result.url)
+                if db.get_article_by_normalized_url(quick_normalized_url):
+                    processed_urls.add(quick_normalized_url)
+                    already_tracked += 1
+                    continue
+
                 normalized_url = process_result(
                     db, keyword, result.url, result.press, result.title, settings
                 )
@@ -313,6 +321,7 @@ def run_discovery(
             except Exception as exc:
                 print(f"  [ERROR] {result.url}: {exc}")
 
+    print(f"DISCOVER already_tracked_skipped={already_tracked}")
     return processed, skipped
 
 
