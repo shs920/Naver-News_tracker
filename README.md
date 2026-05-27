@@ -43,6 +43,7 @@
 2. Supabase SQL Editor에서 [database/init.sql](database/init.sql)을 실행합니다.
 3. 기본 식품기업 키워드가 `keywords` 테이블에 등록됩니다. 현재 기본값에는 `삼립`, `스타벅스`도 포함됩니다.
 4. 키워드를 추가하려면 Supabase에서 `keywords.keyword`에 값을 추가하고 `is_active=true`로 둡니다.
+5. 기존 프로젝트에 업데이트하는 경우에도 [database/init.sql](database/init.sql)을 다시 실행해 주세요. `crawler_runs` 감시 테이블과 인덱스가 추가됩니다.
 
 ## 크롤러 환경변수
 
@@ -110,10 +111,11 @@ DIAG_KEYWORDS="빙그레,스타벅스" python scripts/diagnose_missing_articles.
 
 1. 5분마다 실행
 2. 신규 기사 탐색(`CRAWLER_MODE=discover`)과 기존 기사 재확인(`CRAWLER_MODE=recheck`)을 별도 병렬 job으로 실행
-3. 각 job은 4개 그룹으로 나뉘어 키워드와 기사 후보를 분산 처리
+3. 신규 기사 탐색은 8개 그룹, 기존 기사 재확인은 4개 그룹으로 나뉘어 키워드와 기사 후보를 분산 처리
 4. Python 3.11 설치
 5. `crawler/requirements.txt` 설치
 6. `python crawler/main.py` 실행
+7. 각 job의 시작, 성공, 실패 상태를 Supabase `crawler_runs` 테이블에 기록
 
 GitHub 저장소의 `Settings > Secrets and variables > Actions`에 아래 Secrets를 추가합니다.
 
@@ -121,8 +123,57 @@ GitHub 저장소의 `Settings > Secrets and variables > Actions`에 아래 Secre
 | --- | --- |
 | `SUPABASE_URL` | Supabase Project URL |
 | `SUPABASE_KEY` | Supabase service_role key |
+| `NAVER_CLIENT_ID` | Naver Search API Client ID |
+| `NAVER_CLIENT_SECRET` | Naver Search API Client Secret |
 
 수동 실행은 GitHub Actions 화면에서 `Crawl news changes` 워크플로를 선택한 뒤 `Run workflow`를 누르면 됩니다.
+
+워크플로는 `repository_dispatch` 이벤트도 지원합니다. 외부 감시 시스템에서 `crawl-news` 이벤트 또는 `workflow_dispatch` API를 호출하면 GitHub Actions 스케줄이 지연될 때도 크롤러를 다시 깨울 수 있습니다.
+
+## 실행 상태 감시
+
+크롤러는 실행할 때마다 `crawler_runs` 테이블에 아래 상태를 기록합니다.
+
+- `running`: job 시작
+- `success`: 정상 종료
+- `failed`: 예외로 실패
+
+웹 메인 화면 상단에는 최근 `discover`, `recheck` 성공 시각이 표시됩니다.
+
+- 20분 이내: 정상
+- 20~45분: 지연 의심
+- 45분 초과: 중단 가능성 높음
+
+GitHub Actions의 cron은 무료이고 편하지만, GitHub 사정에 따라 지연되거나 일부 실행이 누락될 수 있습니다. 따라서 실제 운영에서는 GitHub Actions 스케줄만 믿지 말고 외부 무료 cron을 보조 시계로 두는 것을 권장합니다.
+
+## Cloudflare Workers Cron 감시 설정
+
+[docs/cloudflare-worker-cron.js](docs/cloudflare-worker-cron.js)는 Supabase `crawler_runs`를 확인하고, 최근 성공 실행이 오래됐으면 GitHub Actions를 수동으로 깨우는 Worker 예시입니다.
+
+1. Cloudflare Dashboard에서 `Workers & Pages`로 이동합니다.
+2. 새 Worker를 만들고 [docs/cloudflare-worker-cron.js](docs/cloudflare-worker-cron.js) 내용을 붙여 넣습니다.
+3. Worker `Settings > Variables`에 아래 값을 설정합니다.
+
+| 이름 | 예시 | 설명 |
+| --- | --- | --- |
+| `GITHUB_OWNER` | `shs920` | GitHub 계정명 |
+| `GITHUB_REPO` | `Naver-News_tracker` | 저장소명 |
+| `GITHUB_WORKFLOW` | `crawl.yml` | 실행할 workflow 파일명 |
+| `GITHUB_REF` | `main` | 실행할 브랜치 |
+| `SUPABASE_URL` | `https://...supabase.co` | Supabase Project URL |
+| `STALE_MINUTES` | `15` | 몇 분 이상 성공 기록이 없으면 재실행할지 |
+
+4. Worker `Settings > Variables > Secrets`에 아래 값을 Secret으로 추가합니다.
+
+| 이름 | 설명 |
+| --- | --- |
+| `GITHUB_TOKEN` | Fine-grained GitHub token. 대상 저장소에 `Actions: Read and write` 권한 필요 |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase service_role key |
+
+5. Worker `Triggers > Cron Triggers`에서 `*/5 * * * *`를 추가합니다.
+6. Worker URL을 한 번 열어 JSON 결과가 나오는지 확인합니다.
+
+`discoverAge` 또는 `recheckAge`가 `STALE_MINUTES`보다 크면 Worker가 GitHub Actions를 수동 실행합니다. GitHub Actions 자체 cron과 Worker cron을 같이 쓰면, 한쪽이 지연되어도 다른 쪽이 보완합니다.
 
 ## 웹 뷰어 환경변수
 

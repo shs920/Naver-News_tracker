@@ -8,6 +8,7 @@
 """
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from typing import Any
 
@@ -384,42 +385,81 @@ def main() -> None:
     if mode not in {"both", "discover", "recheck"}:
         raise RuntimeError("CRAWLER_MODE must be one of: both, discover, recheck")
 
-    db = NewsTrackerDB(settings)
-    db.ensure_keywords(settings.seed_keywords)
-    db.deactivate_keywords(settings.discovery_excluded_keywords)
-    all_keywords = db.get_active_keywords()
-
-    if not all_keywords:
-        print("No active keywords found.")
-        return
-
-    discovery_keywords = exclude_discovery_keywords(
-        all_keywords,
-        settings.discovery_excluded_keywords,
-    )
-    keywords = select_keywords_for_run(
-        discovery_keywords if mode in {"both", "discover"} else all_keywords,
-        settings.max_keywords_per_run,
-        settings.keyword_group_index,
-        settings.keyword_group_count,
-    )
-    fallback_keyword = keywords[0] if keywords else all_keywords[0]
-    processed_urls: set[str] = set()
-
+    db: NewsTrackerDB | None = None
+    run_log_id: str | None = None
+    keywords_count = 0
     discovered = 0
     skipped = 0
     rechecked = 0
 
-    if mode in {"both", "discover"}:
-        discovered, skipped = run_discovery(db, keywords, all_keywords, settings, processed_urls)
+    try:
+        db = NewsTrackerDB(settings)
+        run_log_id = db.create_crawler_run({
+            "github_run_id": os.environ.get("GITHUB_RUN_ID"),
+            "mode": mode,
+            "group_index": settings.keyword_group_index,
+            "group_count": settings.keyword_group_count,
+            "status": "running",
+            "started_at": utc_now_iso(),
+        })
 
-    if mode in {"both", "recheck"}:
-        rechecked = run_recheck(db, fallback_keyword, settings, processed_urls)
+        db.ensure_keywords(settings.seed_keywords)
+        db.deactivate_keywords(settings.discovery_excluded_keywords)
+        all_keywords = db.get_active_keywords()
 
-    print(
-        f"\nDONE mode={mode}, discover_processed={discovered}, "
-        f"skip={skipped}, recheck={rechecked}, unique_urls={len(processed_urls)}"
-    )
+        if not all_keywords:
+            print("No active keywords found.")
+            db.finish_crawler_run(run_log_id, {
+                "status": "success",
+                "finished_at": utc_now_iso(),
+            })
+            return
+
+        discovery_keywords = exclude_discovery_keywords(
+            all_keywords,
+            settings.discovery_excluded_keywords,
+        )
+        keywords = select_keywords_for_run(
+            discovery_keywords if mode in {"both", "discover"} else all_keywords,
+            settings.max_keywords_per_run,
+            settings.keyword_group_index,
+            settings.keyword_group_count,
+        )
+        keywords_count = len(keywords)
+        fallback_keyword = keywords[0] if keywords else all_keywords[0]
+        processed_urls: set[str] = set()
+
+        if mode in {"both", "discover"}:
+            discovered, skipped = run_discovery(db, keywords, all_keywords, settings, processed_urls)
+
+        if mode in {"both", "recheck"}:
+            rechecked = run_recheck(db, fallback_keyword, settings, processed_urls)
+
+        db.finish_crawler_run(run_log_id, {
+            "status": "success",
+            "finished_at": utc_now_iso(),
+            "keywords_count": keywords_count,
+            "processed_count": discovered,
+            "skipped_count": skipped,
+            "rechecked_count": rechecked,
+        })
+
+        print(
+            f"\nDONE mode={mode}, discover_processed={discovered}, "
+            f"skip={skipped}, recheck={rechecked}, unique_urls={len(processed_urls)}"
+        )
+    except Exception as exc:
+        if db is not None:
+            db.finish_crawler_run(run_log_id, {
+                "status": "failed",
+                "finished_at": utc_now_iso(),
+                "keywords_count": keywords_count,
+                "processed_count": discovered,
+                "skipped_count": skipped,
+                "rechecked_count": rechecked,
+                "error_message": str(exc)[:1000],
+            })
+        raise
 
 
 if __name__ == "__main__":

@@ -25,6 +25,19 @@ interface ArticleChange {
   title: string | null;
 }
 
+interface CrawlerRun {
+  id: string;
+  mode: string;
+  status: "running" | "success" | "failed";
+  started_at: string;
+  finished_at: string | null;
+  keywords_count: number;
+  processed_count: number;
+  skipped_count: number;
+  rechecked_count: number;
+  error_message: string | null;
+}
+
 const PAGE_SIZE = 50;
 
 const BADGE_STYLE: Record<string, React.CSSProperties> = {
@@ -46,9 +59,85 @@ function Badge({ label }: { label: string }) {
   );
 }
 
+function latestSuccessfulRun(runs: CrawlerRun[], mode: string) {
+  return runs.find(r => r.mode === mode && r.status === "success") || null;
+}
+
+function runAgeMinutes(run: CrawlerRun | null) {
+  if (!run) return Number.POSITIVE_INFINITY;
+  const at = run.finished_at || run.started_at;
+  return Math.floor((Date.now() - new Date(at).getTime()) / 60000);
+}
+
+function statusColor(ageMinutes: number) {
+  if (ageMinutes <= 20) return { background: "#e6f4ea", color: "#137333", border: "#b7dfc2" };
+  if (ageMinutes <= 45) return { background: "#fef7e0", color: "#8a5a00", border: "#f6d78b" };
+  return { background: "#fce8e6", color: "#c5221f", border: "#f5b8b5" };
+}
+
+function CrawlerStatus({ runs }: { runs: CrawlerRun[] }) {
+  const discover = latestSuccessfulRun(runs, "discover");
+  const recheck = latestSuccessfulRun(runs, "recheck");
+  const latestFailed = runs.find(r => r.status === "failed");
+
+  const items = [
+    { label: "신규 탐색", run: discover, countLabel: "처리", count: discover?.processed_count || 0 },
+    { label: "수정 확인", run: recheck, countLabel: "재확인", count: recheck?.rechecked_count || 0 },
+  ];
+
+  return (
+    <div style={{
+      display: "grid",
+      gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+      gap: 10,
+      marginBottom: 20,
+    }}>
+      {items.map(item => {
+        const age = runAgeMinutes(item.run);
+        const color = statusColor(age);
+        return (
+          <div key={item.label} style={{
+            border: `1px solid ${color.border}`,
+            background: color.background,
+            borderRadius: 8,
+            padding: "10px 12px",
+          }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center" }}>
+              <strong style={{ color: color.color, fontSize: 13 }}>{item.label}</strong>
+              <span style={{ color: color.color, fontSize: 12 }}>
+                {Number.isFinite(age) ? `${age}분 전` : "기록 없음"}
+              </span>
+            </div>
+            <div style={{ color: "#555", fontSize: 12, marginTop: 5 }}>
+              {item.run
+                ? `${new Date(item.run.finished_at || item.run.started_at).toLocaleString("ko-KR")} · ${item.countLabel} ${item.count}건`
+                : "crawler_runs 테이블에 성공 기록이 없습니다"}
+            </div>
+          </div>
+        );
+      })}
+      {latestFailed && (
+        <div style={{
+          border: "1px solid #f5b8b5",
+          background: "#fff5f5",
+          borderRadius: 8,
+          padding: "10px 12px",
+          gridColumn: "1 / -1",
+          color: "#9f1d1a",
+          fontSize: 12,
+        }}>
+          최근 실패: {latestFailed.mode} · {new Date(latestFailed.started_at).toLocaleString("ko-KR")}
+          {latestFailed.error_message ? ` · ${latestFailed.error_message}` : ""}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function HomePage() {
   const [changes, setChanges] = useState<ArticleChange[]>([]);
   const [keywords, setKeywords] = useState<string[]>([]);
+  const [crawlerRuns, setCrawlerRuns] = useState<CrawlerRun[]>([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(0);
   const [keyword, setKeyword] = useState("");
@@ -65,6 +154,21 @@ export default function HomePage() {
       .then(({ data }) => {
         if (data) setKeywords(data.map((r: { keyword: string }) => r.keyword));
       });
+  }, []);
+
+  const fetchCrawlerRuns = useCallback(async () => {
+    const { data, error } = await supabase
+      .from("crawler_runs")
+      .select("id, mode, status, started_at, finished_at, keywords_count, processed_count, skipped_count, rechecked_count, error_message")
+      .order("started_at", { ascending: false })
+      .limit(30);
+
+    if (error) {
+      console.error("crawler_runs fetch error:", error);
+      setCrawlerRuns([]);
+      return;
+    }
+    setCrawlerRuns((data || []) as CrawlerRun[]);
   }, []);
 
   const fetchChanges = useCallback(async (p: number, kw: string) => {
@@ -166,9 +270,13 @@ export default function HomePage() {
   }, [page, keyword, fetchChanges]);
 
   useEffect(() => {
-    const t = setInterval(() => fetchChanges(page, keyword), 60000);
+    fetchCrawlerRuns();
+    const t = setInterval(() => {
+      fetchChanges(page, keyword);
+      fetchCrawlerRuns();
+    }, 60000);
     return () => clearInterval(t);
-  }, [page, keyword, fetchChanges]);
+  }, [page, keyword, fetchChanges, fetchCrawlerRuns]);
 
   const totalPages = Math.ceil(total / PAGE_SIZE);
 
@@ -183,6 +291,8 @@ export default function HomePage() {
           기사 제목·본문·사진의 수정 내역을 실시간으로 추적합니다
         </p>
       </div>
+
+      <CrawlerStatus runs={crawlerRuns} />
 
       {/* 키워드 필터 — Supabase keywords 테이블에서 동적 로드 */}
       <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>

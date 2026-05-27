@@ -115,6 +115,23 @@ class NewsTrackerDB:
     def create_change(self, change: dict[str, Any]) -> None:
         self.client.table("article_changes").insert(change).execute()
 
+    def create_crawler_run(self, values: dict[str, Any]) -> str | None:
+        try:
+            result = self.client.table("crawler_runs").insert(values).execute()
+            row = (result.data or [None])[0]
+            return row.get("id") if row else None
+        except Exception as exc:
+            print(f"[RUN-LOG-WARN] could not create crawler_runs row: {exc}")
+            return None
+
+    def finish_crawler_run(self, run_id: str | None, values: dict[str, Any]) -> None:
+        if not run_id:
+            return
+        try:
+            self.client.table("crawler_runs").update(values).eq("id", run_id).execute()
+        except Exception as exc:
+            print(f"[RUN-LOG-WARN] could not update crawler_runs row: {exc}")
+
 
 def _stable_group(value: str, group_count: int) -> int:
     digest = hashlib.sha1(value.encode("utf-8")).hexdigest()

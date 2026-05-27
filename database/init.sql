@@ -59,6 +59,23 @@ create table if not exists public.article_changes (
   unique (article_id, from_version, to_version)
 );
 
+create table if not exists public.crawler_runs (
+  id uuid primary key default gen_random_uuid(),
+  github_run_id text,
+  mode text not null,
+  group_index integer not null default 0,
+  group_count integer not null default 1,
+  status text not null check (status in ('running', 'success', 'failed')),
+  started_at timestamptz not null default now(),
+  finished_at timestamptz,
+  keywords_count integer not null default 0,
+  processed_count integer not null default 0,
+  skipped_count integer not null default 0,
+  rechecked_count integer not null default 0,
+  error_message text,
+  created_at timestamptz not null default now()
+);
+
 -- 인덱스
 create index if not exists idx_keywords_active
   on public.keywords (is_active, keyword);
@@ -74,6 +91,10 @@ create index if not exists idx_article_changes_changed_at
   on public.article_changes (changed_at desc);
 create index if not exists idx_article_changes_article
   on public.article_changes (article_id, to_version desc);
+create index if not exists idx_crawler_runs_started_at
+  on public.crawler_runs (started_at desc);
+create index if not exists idx_crawler_runs_mode_status_started
+  on public.crawler_runs (mode, status, started_at desc);
 
 -- updated_at 자동 갱신
 create or replace function public.set_updated_at()
@@ -99,6 +120,7 @@ alter table public.keywords enable row level security;
 alter table public.articles enable row level security;
 alter table public.article_versions enable row level security;
 alter table public.article_changes enable row level security;
+alter table public.crawler_runs enable row level security;
 
 drop policy if exists "Public read keywords" on public.keywords;
 create policy "Public read keywords" on public.keywords for select using (true);
@@ -111,6 +133,9 @@ create policy "Public read article versions" on public.article_versions for sele
 
 drop policy if exists "Public read article changes" on public.article_changes;
 create policy "Public read article changes" on public.article_changes for select using (true);
+
+drop policy if exists "Public read crawler runs" on public.crawler_runs;
+create policy "Public read crawler runs" on public.crawler_runs for select using (true);
 
 -- 초기 키워드
 insert into public.keywords (keyword) values
