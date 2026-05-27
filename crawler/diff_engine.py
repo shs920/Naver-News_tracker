@@ -10,6 +10,23 @@ from difflib import SequenceMatcher
 from typing import Any
 
 EMAIL_PATTERN = re.compile(r"\b[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}\b")
+COMPARE_NOISE_PATTERNS = [
+    re.compile(pattern, re.IGNORECASE)
+    for pattern in [
+        r"본문\s*글씨",
+        r"SNS\s*기사보내기",
+        r"이메일\(으\)로\s*기사보내기",
+        r"다른\s*공유\s*찾기",
+        r"기사스크랩",
+        r"다른기사\s*보기",
+        r"저작권자|무단전재|재배포\s*금지",
+        r"개의\s*댓글|댓글\s*정렬|BEST댓글|댓글삭제|댓글수정",
+        r"비밀번호|회원로그인|내\s*댓글\s*모음",
+        r"많이\s*본\s*뉴스|최신기사|인기뉴스|관련기사",
+        r"주소\s*:|대표전화\s*:|등록번호\s*:|발행인\s*:|편집인\s*:",
+        r"All\s+rights\s+reserved",
+    ]
+]
 
 
 def stable_hash(value: str | None) -> str | None:
@@ -34,6 +51,20 @@ def normalize_meaningful_text(value: str | None) -> str:
     return value.strip()
 
 
+def strip_compare_noise(value: str | None) -> str:
+    if not value:
+        return ""
+    kept: list[str] = []
+    for raw_line in value.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if any(pattern.search(line) for pattern in COMPARE_NOISE_PATTERNS):
+            continue
+        kept.append(line)
+    return "\n".join(kept)
+
+
 def change_ratio(before: str | None, after: str | None) -> float:
     before_norm = normalize_meaningful_text(before)
     after_norm  = normalize_meaningful_text(after)
@@ -43,8 +74,27 @@ def change_ratio(before: str | None, after: str | None) -> float:
 
 
 def body_change_ratio(before: str | None, after: str | None) -> float:
-    before_paras = split_normalized_paragraphs(before)
-    after_paras = split_normalized_paragraphs(after)
+    before_clean = strip_compare_noise(before)
+    after_clean = strip_compare_noise(after)
+    before_full = normalize_meaningful_text(before_clean)
+    after_full = normalize_meaningful_text(after_clean)
+    if not before_full and not after_full:
+        return 0.0
+    if before_full == after_full:
+        return 0.0
+    if before_full and after_full and (before_full in after_full or after_full in before_full):
+        shorter = min(len(before_full), len(after_full))
+        longer = max(len(before_full), len(after_full))
+        added_ratio = 1.0 - (shorter / max(longer, 1))
+        if added_ratio <= 0.03:
+            return 0.0
+
+    whole_ratio = 1.0 - SequenceMatcher(None, before_full, after_full).ratio()
+    if whole_ratio <= 0.015:
+        return 0.0
+
+    before_paras = split_normalized_paragraphs(before_clean)
+    after_paras = split_normalized_paragraphs(after_clean)
     if not before_paras and not after_paras:
         return 0.0
     if not before_paras or not after_paras:

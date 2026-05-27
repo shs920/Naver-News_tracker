@@ -295,6 +295,8 @@ def _selectors_for_page(soup: BeautifulSoup, press: str | None) -> list[str]:
         selectors.extend([".view_con", ".article_view", "#article-view-content", ".article-body", "article"])
     if "newstomato.com" in host:
         selectors.extend(["#article_content", ".rns_text", ".article_view", ".view_con", "article"])
+    if "goodkyung.com" in host:
+        selectors.extend(["#article-view-content-div", "#article-view-content", ".article-view-content", ".article-body"])
 
     selectors.extend(COMMON_SELECTORS)
     selectors.extend(["main article", "article"])

@@ -222,6 +222,19 @@ function changedImageIndexes(beforeHashes: string[], afterHashes: string[], thre
 }
 
 const emailPattern = /[\w.+-]+@[\w.-]+\.[A-Za-z]{2,}/g;
+const compareNoisePatterns = [
+  /본문\s*글씨/i,
+  /SNS\s*기사보내기/i,
+  /이메일\(으\)로\s*기사보내기/i,
+  /기사스크랩|다른\s*공유\s*찾기/i,
+  /다른기사\s*보기/i,
+  /저작권자|무단전재|재배포\s*금지/i,
+  /개의\s*댓글|댓글\s*정렬|BEST댓글|댓글삭제|댓글수정/i,
+  /비밀번호|회원로그인|내\s*댓글\s*모음/i,
+  /많이\s*본\s*뉴스|최신기사|인기뉴스|관련기사/i,
+  /주소\s*:|대표전화\s*:|등록번호\s*:|발행인\s*:|편집인\s*:/i,
+  /All\s+rights\s+reserved/i,
+];
 
 function stripEmailAddresses(text: string): string {
   return (text || "").replace(emailPattern, "");
@@ -232,6 +245,12 @@ function normalizeText(text: string): string {
     .toLowerCase()
     .replace(/[\s"'""''.,!?;:()[\]{}<>·ㆍ\-_/\\|~`+=*&^%$#@]+/g, "")
     .trim();
+}
+
+function isCompareNoiseParagraph(text: string): boolean {
+  const value = (text || "").trim();
+  if (!value) return true;
+  return compareNoisePatterns.some((pattern) => pattern.test(value));
 }
 
 function similarity(a: string, b: string): number {
@@ -253,7 +272,7 @@ function splitParagraphs(text: string | null): string[] {
   return (text || "")
     .split(/\n+/)
     .map((paragraph) => paragraph.trim())
-    .filter(Boolean);
+    .filter((paragraph) => paragraph && !isCompareNoiseParagraph(paragraph));
 }
 
 function mergeChangedParagraphRuns(rows: DiffRow[]): DiffRow[] {
