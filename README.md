@@ -57,6 +57,7 @@ GitHub Actions Secrets 또는 로컬 `.env`에 설정합니다.
 | `MAX_RECHECK_ARTICLES` | 아니오 | 기존 추적 기사 재확인 개수. 기본값 `80` |
 | `RECHECK_CANDIDATE_POOL` | 아니오 | 재확인 후보 풀 크기. 최근 기사와 오래 미확인 기사에서 후보를 뽑습니다. 기본값 `800` |
 | `CRAWLER_MODE` | 아니오 | `both`, `discover`, `recheck` 중 하나. GitHub Actions에서는 신규 기사 탐색과 기존 기사 재확인을 별도 job으로 실행합니다. 기본값 `both` |
+| `DISCOVERY_EXCLUDED_KEYWORDS` | 아니오 | relevance 판단에는 쓰지만 별도 검색은 하지 않을 키워드 목록. 기본값 `대상웰라이프` |
 | `MAX_KEYWORDS_PER_RUN` | 아니오 | 1개 crawler job에서 처리할 최대 키워드 수. `0`이면 배정된 그룹 전체 처리. 기본값 `0` |
 | `KEYWORD_GROUP_INDEX` | 아니오 | 병렬 키워드 그룹 번호. GitHub Actions matrix에서 자동 설정 |
 | `KEYWORD_GROUP_COUNT` | 아니오 | 병렬 키워드 그룹 개수. GitHub Actions 기본값 `4` |

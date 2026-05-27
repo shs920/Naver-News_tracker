@@ -33,6 +33,13 @@ class NewsTrackerDB:
             ignore_duplicates=True,
         ).execute()
 
+    def deactivate_keywords(self, keywords: list[str] | tuple[str, ...]) -> None:
+        unique_keywords = sorted({keyword.strip() for keyword in keywords if keyword and keyword.strip()})
+        if not unique_keywords:
+            return
+        for keyword in unique_keywords:
+            self.client.table("keywords").update({"is_active": False}).eq("keyword", keyword).execute()
+
     def get_article_by_normalized_url(self, normalized_url: str) -> dict[str, Any] | None:
         result = (
             self.client.table("articles")

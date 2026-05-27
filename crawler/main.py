@@ -11,8 +11,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from article_parser import ParsedArticle, fetch_article
-from article_parser import normalize_url as normalize_article_url
+from article_parser import ParsedArticle, fetch_article, normalize_url as normalize_article_url
 from config import get_settings
 from db import NewsTrackerDB
 from diff_engine import detect_change, stable_hash
@@ -52,6 +51,13 @@ def select_keywords_for_run(
     if len(selected) < max_keywords_per_run:
         selected.extend(keywords[:max_keywords_per_run - len(selected)])
     return selected
+
+
+def exclude_discovery_keywords(keywords: list[str], excluded_keywords: tuple[str, ...]) -> list[str]:
+    excluded = {keyword.strip() for keyword in excluded_keywords if keyword and keyword.strip()}
+    if not excluded:
+        return keywords
+    return [keyword for keyword in keywords if keyword not in excluded]
 
 
 def parse_utc_datetime(value: str | None) -> datetime | None:
@@ -380,14 +386,19 @@ def main() -> None:
 
     db = NewsTrackerDB(settings)
     db.ensure_keywords(settings.seed_keywords)
+    db.deactivate_keywords(settings.discovery_excluded_keywords)
     all_keywords = db.get_active_keywords()
 
     if not all_keywords:
         print("No active keywords found.")
         return
 
-    keywords = select_keywords_for_run(
+    discovery_keywords = exclude_discovery_keywords(
         all_keywords,
+        settings.discovery_excluded_keywords,
+    )
+    keywords = select_keywords_for_run(
+        discovery_keywords if mode in {"both", "discover"} else all_keywords,
         settings.max_keywords_per_run,
         settings.keyword_group_index,
         settings.keyword_group_count,

@@ -6,7 +6,8 @@ on:
   workflow_dispatch:
 
 env:
-  SEED_KEYWORDS: "빙그레,삼양식품,농심,CJ제일제당,오뚜기,오리온,롯데웰푸드,롯데칠성,대상,대상웰라이프,동원F&B,매일유업,남양유업,서울우유,하림,삼립,해태,hy,하이트진로,오비맥주,BBQ,BHC,교촌,스타벅스"
+  SEED_KEYWORDS: "빙그레,삼양식품,농심,CJ제일제당,오뚜기,오리온,롯데웰푸드,롯데칠성,대상,동원F&B,매일유업,남양유업,서울우유,하림,삼립,해태,hy,하이트진로,오비맥주,BBQ,BHC,교촌,스타벅스"
+  DISCOVERY_EXCLUDED_KEYWORDS: "대상웰라이프"
   PREFILTER_SEARCH_RESULTS: "false"
   REQUEST_TIMEOUT: "10"
 
@@ -48,7 +49,7 @@ jobs:
           KEYWORD_GROUP_INDEX: ${{ matrix.group }}
           KEYWORD_GROUP_COUNT: "8"
           MAX_KEYWORDS_PER_RUN: "0"
-          MAX_RESULTS_PER_KEYWORD: "40"
+          MAX_RESULTS_PER_KEYWORD: "100"
         run: python crawler/main.py
 
   recheck:
@@ -89,4 +90,6 @@ jobs:
           KEYWORD_GROUP_COUNT: "4"
           MAX_RECHECK_ARTICLES: "80"
           RECHECK_CANDIDATE_POOL: "1200"
-        run: python crawler/main.py
+        run: |
+          sleep $(( ${{ matrix.group }} * 45 ))
+          python crawler/main.py

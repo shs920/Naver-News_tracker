@@ -7,9 +7,10 @@ load_dotenv()
 
 DEFAULT_SEED_KEYWORDS = (
     "빙그레,삼양식품,농심,CJ제일제당,오뚜기,오리온,롯데웰푸드,롯데칠성,"
-    "대상,대상웰라이프,동원F&B,매일유업,남양유업,서울우유,하림,삼립,"
+    "대상,동원F&B,매일유업,남양유업,서울우유,하림,삼립,"
     "해태,hy,하이트진로,오비맥주,BBQ,BHC,교촌,스타벅스"
 )
+DEFAULT_DISCOVERY_EXCLUDED_KEYWORDS = "대상웰라이프"
 
 
 @dataclass(frozen=True)
@@ -29,6 +30,7 @@ class Settings:
     crawler_mode: str = "both"
     prefilter_search_results: bool = False
     seed_keywords: tuple[str, ...] = ()
+    discovery_excluded_keywords: tuple[str, ...] = ()
     user_agent: str = (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -79,6 +81,14 @@ def get_settings() -> Settings:
         seed_keywords=tuple(
             keyword.strip()
             for keyword in os.environ.get("SEED_KEYWORDS", DEFAULT_SEED_KEYWORDS).split(",")
+            if keyword.strip()
+        ),
+        discovery_excluded_keywords=tuple(
+            keyword.strip()
+            for keyword in os.environ.get(
+                "DISCOVERY_EXCLUDED_KEYWORDS",
+                DEFAULT_DISCOVERY_EXCLUDED_KEYWORDS,
+            ).split(",")
             if keyword.strip()
         ),
         title_ratio_threshold=float(os.environ.get("TITLE_RATIO_THRESHOLD", "0.08")),
