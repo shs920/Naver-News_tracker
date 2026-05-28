@@ -138,12 +138,55 @@ def process_result(
         existing = db.get_article_by_normalized_url(parsed.normalized_url)
         if existing and not existing.get("is_deleted"):
             now = utc_now_iso()
+            latest = db.get_latest_version(existing["id"])
+            from_version = int(
+                existing.get("current_version")
+                or (latest.get("version") if latest else 1)
+            )
+            to_version = from_version + 1
+
+            try:
+                db.create_version({
+                    "article_id": existing["id"],
+                    "version": to_version,
+                    "keyword": existing.get("last_keyword") or keyword,
+                    "title": latest.get("title") if latest else None,
+                    "content": None,
+                    "content_plain": None,
+                    "image_urls": [],
+                    "image_hashes": [],
+                    "title_hash": latest.get("title_hash") if latest else None,
+                    "content_hash": stable_hash(""),
+                    "fetched_at": now,
+                })
+            except Exception as exc:
+                print(f"  [ERROR] 삭제 버전 저장 실패: {url} → {exc}")
+
+            try:
+                db.create_change({
+                    "article_id": existing["id"],
+                    "from_version": from_version,
+                    "to_version": to_version,
+                    "title_changed": False,
+                    "body_changed": False,
+                    "image_changed": False,
+                    "deleted_changed": True,
+                    "change_score": 1.0,
+                    "title_change_ratio": 0,
+                    "body_change_ratio": 0,
+                    "image_change_ratio": 0,
+                    "changed_at": now,
+                })
+            except Exception:
+                pass
+
             db.update_article(existing["id"], {
                 "is_deleted": True,
                 "deleted_at": now,
                 "last_seen_at": now,
+                "current_version": to_version,
             })
-            print(f"  [DELETED] {url}")
+            print(f"  [DELETED] v{to_version}: {url}")
         return parsed.normalized_url
 
     # ── 3. 파싱 실패 (메인/섹션 페이지 등) ──────────────────

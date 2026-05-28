@@ -145,7 +145,7 @@ def fetch_article(url: str, fallback_press: str | None, settings: Settings) -> P
     html = response.text or ""
 
     if response.status_code == 403:
-        return _failed(url, normalized_url, fallback_press, final_url, response.status_code)
+        return _deleted(url, normalized_url, fallback_press, final_url, response.status_code)
     if _is_deleted_response(response.status_code, html, url, final_url):
         return _deleted(url, normalized_url, fallback_press, final_url, response.status_code)
     if is_non_article_url(final_url):
