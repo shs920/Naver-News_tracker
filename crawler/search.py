@@ -42,9 +42,11 @@ def search_naver_news(keyword: str, settings: Settings) -> list[SearchResult]:
     results: list[SearchResult] = []
     seen: set[str] = set()
     start = 1
+    pages_fetched = 0
+    max_pages = max(1, settings.max_search_pages)
 
     with httpx.Client(timeout=settings.request_timeout, headers=headers) as client:
-        while len(results) < settings.max_results_per_keyword:
+        while len(results) < settings.max_results_per_keyword and pages_fetched < max_pages:
             display = min(MAX_DISPLAY, settings.max_results_per_keyword - len(results))
             params = {
                 "query": keyword,
@@ -65,6 +67,7 @@ def search_naver_news(keyword: str, settings: Settings) -> list[SearchResult]:
             items = data.get("items", [])
             if not items:
                 break
+            pages_fetched += 1
 
             for item in items:
                 naver_link = item.get("link", "")

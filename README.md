@@ -55,6 +55,7 @@ GitHub Actions Secrets 또는 로컬 `.env`에 설정합니다.
 | `SUPABASE_KEY` | 예 | Supabase `service_role` key. GitHub Secrets에만 저장하세요. |
 | `REQUEST_TIMEOUT` | 아니오 | HTTP 요청 타임아웃 초. 기본값 `10` |
 | `MAX_RESULTS_PER_KEYWORD` | 아니오 | 키워드별 네이버 뉴스 검색 결과 조회 개수. 기본값 `100` |
+| `MAX_SEARCH_PAGES` | 아니오 | 네이버 뉴스 API 페이지 조회 수. 100건을 넘겨 조회하려면 `MAX_RESULTS_PER_KEYWORD`와 함께 늘립니다. 기본값 `1` |
 | `MAX_RECHECK_ARTICLES` | 아니오 | 기존 추적 기사 재확인 개수. 기본값 `80` |
 | `RECHECK_CANDIDATE_POOL` | 아니오 | 재확인 후보 풀 크기. 최근 기사와 오래 미확인 기사에서 후보를 뽑습니다. 기본값 `800` |
 | `CRAWLER_MODE` | 아니오 | `both`, `discover`, `recheck` 중 하나. GitHub Actions에서는 신규 기사 탐색과 기존 기사 재확인을 별도 job으로 실행합니다. 기본값 `both` |
@@ -161,7 +162,9 @@ GitHub Actions의 cron은 무료이고 편하지만, GitHub 사정에 따라 지
 | `GITHUB_WORKFLOW` | `crawl.yml` | 실행할 workflow 파일명 |
 | `GITHUB_REF` | `main` | 실행할 브랜치 |
 | `SUPABASE_URL` | `https://...supabase.co` | Supabase Project URL |
-| `STALE_MINUTES` | `15` | 몇 분 이상 성공 기록이 없으면 재실행할지 |
+| `STALE_MINUTES` | `7` | 몇 분 이상 성공 기록이 없으면 재실행할지. GitHub Actions 준비 시간이 있으므로 15분보다 짧게 잡는 것을 권장 |
+| `RUNNING_GRACE_MINUTES` | `20` | 최근 실행 중인 crawler/GitHub Actions가 있으면 중복 실행을 막는 유예 시간 |
+| `DISPATCH_COOLDOWN_MINUTES` | `5` | 방금 GitHub workflow가 생성된 경우 추가 dispatch를 막는 시간 |
 
 4. Worker `Settings > Variables > Secrets`에 아래 값을 Secret으로 추가합니다.
 
@@ -170,10 +173,20 @@ GitHub Actions의 cron은 무료이고 편하지만, GitHub 사정에 따라 지
 | `GITHUB_TOKEN` | Fine-grained GitHub token. 대상 저장소에 `Actions: Read and write` 권한 필요 |
 | `SUPABASE_SERVICE_ROLE_KEY` | Supabase service_role key |
 
-5. Worker `Triggers > Cron Triggers`에서 `*/5 * * * *`를 추가합니다.
+5. Worker `Triggers > Cron Triggers`에서 `*/5 * * * *`를 추가합니다. 15분 주기는 권장하지 않습니다. GitHub Actions가 준비와 실행에 몇 분을 쓰기 때문에 Worker도 5분마다 상태를 확인해야 공백이 크게 벌어지지 않습니다.
 6. Worker URL을 한 번 열어 JSON 결과가 나오는지 확인합니다.
 
-`discoverAge` 또는 `recheckAge`가 `STALE_MINUTES`보다 크면 Worker가 GitHub Actions를 수동 실행합니다. GitHub Actions 자체 cron과 Worker cron을 같이 쓰면, 한쪽이 지연되어도 다른 쪽이 보완합니다.
+`discoverAge` 또는 `recheckAge`가 `STALE_MINUTES`보다 크면 Worker가 GitHub Actions를 수동 실행합니다. 다만 최근 실행 중인 GitHub Actions나 `crawler_runs.status=running` 기록이 있으면 중복 실행하지 않습니다. GitHub Actions 자체 cron과 Worker cron을 같이 쓰면, 한쪽이 지연되어도 다른 쪽이 보완합니다.
+
+권장 운영값:
+
+- GitHub Actions: 현재처럼 `*/5 * * * *`
+- Cloudflare Workers Cron: `*/5 * * * *`
+- `STALE_MINUTES`: `7`
+- `RUNNING_GRACE_MINUTES`: `20`
+- `DISPATCH_COOLDOWN_MINUTES`: `5`
+
+이 설정은 15분 이상 기다렸다가 복구하는 방식이 아니라, 마지막 성공 기록이 7분을 넘기면 선제적으로 상태를 확인하고 필요한 경우만 재실행합니다. GitHub Actions 실행 자체에 3~5분이 걸리는 현실을 감안하면 이쪽이 공백을 훨씬 작게 만듭니다.
 
 ## 웹 뷰어 환경변수
 
@@ -221,7 +234,7 @@ npm run build
 
 - `crawler/main.py`는 GitHub Actions에서 실행되도록 workflow와 requirements가 연결되어 있습니다.
 - `crawler/requirements.txt`에는 `readability-lxml` 실행에 필요한 `lxml`을 명시했습니다.
-- GitHub Actions는 5분마다 실행되며, 4개 병렬 job으로 전체 키워드를 나누어 같은 회차에 모두 검색합니다. 원문 fetch 전 제목/요약 사전 필터는 기본 비활성화되어 검색 결과 누락을 줄이고, 원문을 파싱한 뒤 본문 기준으로 관련성을 판단합니다.
+- GitHub Actions는 5분마다 실행되며, 신규 기사 탐색 8개 job과 기존 기사 재확인 4개 job으로 작업을 나누어 처리합니다. 원문 fetch 전 제목/요약 사전 필터는 기본 비활성화되어 검색 결과 누락을 줄이고, 원문을 파싱한 뒤 본문 기준으로 관련성을 판단합니다.
 - 본문 비교는 문단 정렬 기반으로 처리해 중간 문단 삽입 시 뒤 문단 전체가 수정된 것처럼 보이는 현상을 줄입니다.
 - 웹 메인 페이지는 최근 변경 목록, 변경 유형, 언론사, 변경 시각, 버전 번호를 표시합니다.
 - 웹 상세 페이지는 제목, 본문, 사진을 좌우 비교하고 변경 단어만 강조 표시합니다.
