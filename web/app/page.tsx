@@ -333,7 +333,7 @@ export default function HomePage() {
           if (c.title_changed) types.push("제목");
           if (c.body_changed) types.push("본문");
           if (c.image_changed) types.push("사진");
-          if (c.deleted_changed) types.push("삭제");
+          if (c.deleted_changed && article?.is_deleted) types.push("삭제");
 
           return (
             <Link

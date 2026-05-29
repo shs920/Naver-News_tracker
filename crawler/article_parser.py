@@ -234,9 +234,7 @@ def _is_deleted_response(status_code: int, html: str, original_url: str, final_u
     plain = BeautifulSoup(html, "html.parser").get_text(" ", strip=True)
     if any(pattern in plain for pattern in DELETED_PATTERNS):
         return True
-    original_host = urlparse(original_url).netloc.lower()
-    final = urlparse(final_url)
-    return bool(original_host and final.netloc.lower() != original_host and final.path.rstrip("/") in {"", "/"})
+    return False
 
 
 def _extract_content(
