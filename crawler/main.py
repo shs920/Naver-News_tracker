@@ -136,6 +136,11 @@ def process_result(
     # ── 2. 삭제 기사 처리 ────────────────────────────────────
     if parsed.is_deleted:
         existing = db.get_article_by_normalized_url(parsed.normalized_url)
+        if existing and existing.get("is_deleted"):
+            db.update_article(existing["id"], {"last_seen_at": utc_now_iso()})
+            print(f"  [STILL-DELETED] {url}")
+            return parsed.normalized_url
+
         if existing and not existing.get("is_deleted"):
             now = utc_now_iso()
             latest = db.get_latest_version(existing["id"])
@@ -256,7 +261,7 @@ def process_result(
             "content_plain": latest.get("content_plain"),
             "image_urls":    latest.get("image_urls") or [],
             "image_hashes":  latest.get("image_hashes") or [],
-            "is_deleted":    existing.get("is_deleted", False),
+            "is_deleted":    False,
         },
         {
             "title":         parsed.title,

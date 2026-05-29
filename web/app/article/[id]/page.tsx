@@ -179,6 +179,24 @@ const deletedNoteStyle: CSSProperties = {
   padding: "8px 10px",
 };
 
+const deletedStampStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "center",
+  minHeight: 160,
+  border: "10px solid #c1121f",
+  borderRadius: 14,
+  color: "#c1121f",
+  background: "#fff5f5",
+  fontSize: 64,
+  fontWeight: 1000,
+  letterSpacing: 8,
+  transform: "rotate(-7deg)",
+  margin: "18px auto 30px",
+  width: "min(360px, 88%)",
+  boxShadow: "0 10px 28px rgba(193, 18, 31, 0.18)",
+};
+
 const selectStyle: CSSProperties = {
   height: 32,
   border: "1px solid #cbd3df",
@@ -596,6 +614,7 @@ function ArticlePaper({
   changedImages: Set<number>;
 }) {
   const isAfter = side === "after";
+  const showDeletedStamp = isAfter && article.is_deleted;
   const titleChanged = normalizeText(version.title || "") !== normalizeText(counterpart.title || "");
   const titleTokens = titleChanged ? pairedTokenDiff(isAfter ? counterpart.title || "" : version.title || "", isAfter ? version.title || "" : counterpart.title || "") : null;
 
@@ -618,6 +637,12 @@ function ArticlePaper({
             원문 보기
           </a>
         </div>
+
+        {showDeletedStamp ? (
+          <div aria-label="삭제된 기사" style={deletedStampStyle}>
+            삭제
+          </div>
+        ) : null}
 
         <div style={bodyStyle}>
           <ImageStrip urls={version.image_urls || []} changedImages={isAfter ? changedImages : new Set()} />

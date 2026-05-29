@@ -86,9 +86,17 @@ class NewsTrackerDB:
             .limit(fetch_limit)
             .execute()
         )
+        deleted_result = (
+            self.client.table("articles")
+            .select(columns)
+            .eq("is_deleted", True)
+            .order("last_seen_at", desc=False)
+            .limit(max(limit * max(1, group_count), 50))
+            .execute()
+        )
 
         by_id: dict[str, dict[str, Any]] = {}
-        for row in (recent_result.data or []) + (stale_result.data or []):
+        for row in (recent_result.data or []) + (stale_result.data or []) + (deleted_result.data or []):
             if row.get("id"):
                 by_id[row["id"]] = row
 

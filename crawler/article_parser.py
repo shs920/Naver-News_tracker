@@ -144,10 +144,11 @@ def fetch_article(url: str, fallback_press: str | None, settings: Settings) -> P
     final_url = str(response.url)
     html = response.text or ""
 
-    if response.status_code == 403:
-        return _deleted(url, normalized_url, fallback_press, final_url, response.status_code)
     if _is_deleted_response(response.status_code, html, url, final_url):
         return _deleted(url, normalized_url, fallback_press, final_url, response.status_code)
+    if response.status_code == 403:
+        print(f"  [SKIP] forbidden response, not marking deleted: {url}")
+        return _failed(url, normalized_url, fallback_press, final_url, response.status_code)
     if is_non_article_url(final_url):
         print(f"  [SKIP] redirect landed on non-article URL: {final_url}")
         return _failed(url, normalized_url, fallback_press, final_url, response.status_code)
