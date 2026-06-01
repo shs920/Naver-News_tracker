@@ -360,9 +360,16 @@ def run_discovery(
                     continue
 
                 quick_normalized_url = normalize_article_url(result.url)
-                if db.get_article_by_normalized_url(quick_normalized_url):
+                existing = db.get_article_by_normalized_url(quick_normalized_url)
+                if existing:
                     processed_urls.add(quick_normalized_url)
                     already_tracked += 1
+                    if should_recheck_article(existing):
+                        normalized_url = process_result(
+                            db, keyword, result.url, result.press, result.title, settings
+                        )
+                        if normalized_url:
+                            processed += 1
                     continue
 
                 normalized_url = process_result(
