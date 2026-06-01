@@ -87,16 +87,14 @@ def body_change_ratio(before: str | None, after: str | None) -> float:
         longer = max(len(before_full), len(after_full))
         added_ratio = 1.0 - (shorter / max(longer, 1))
         if added_ratio <= 0.03:
-            return 0.0
+            return max(added_ratio, 0.00001)
 
     whole_ratio = 1.0 - SequenceMatcher(None, before_full, after_full).ratio()
-    if whole_ratio <= 0.015:
-        return 0.0
 
     before_paras = split_normalized_paragraphs(before_clean)
     after_paras = split_normalized_paragraphs(after_clean)
     if not before_paras and not after_paras:
-        return 0.0
+        return whole_ratio
     if not before_paras or not after_paras:
         return 1.0
 
@@ -196,7 +194,7 @@ def detect_change(
     current_image_urls = current.get("image_urls") or []
 
     title_changed   = title_ratio  >= title_threshold
-    body_changed    = body_ratio   >= body_threshold
+    body_changed    = body_ratio   > 0.0
     image_changed   = image_ratio  >= image_threshold
     # Image-only changes are too noisy for news pages because recommendation
     # blocks and lazy-loaded thumbnails move frequently across publishers.
