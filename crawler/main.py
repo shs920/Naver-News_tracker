@@ -17,7 +17,7 @@ from config import get_settings
 from db import NewsTrackerDB
 from diff_engine import detect_change, stable_hash
 from image_hash import compute_image_fingerprints
-from relevance import filter_by_relevance
+from relevance import filter_by_relevance, select_primary_keyword
 from search import search_naver_news
 
 
@@ -123,6 +123,7 @@ def version_payload(
 def process_result(
     db: NewsTrackerDB,
     keyword: str,
+    candidate_keywords: list[str],
     url: str,
     press: str | None,
     search_title: str | None,
@@ -207,6 +208,14 @@ def process_result(
             db.update_article(existing["id"], {"last_seen_at": utc_now_iso()})
             print(f"  [SKIP-RELEVANCE-EXISTING] {keyword}: {(effective_title or '')[:50]}")
         return None
+    primary_keyword = select_primary_keyword(
+        candidate_keywords,
+        keyword,
+        effective_title,
+        parsed.content_plain,
+    )
+    if primary_keyword != keyword:
+        print(f"  [PRIMARY-KEYWORD] {keyword} -> {primary_keyword}: {(effective_title or '')[:50]}")
 
     # ── 5. 이미지 해시 계산 ──────────────────────────────────
     image_urls, image_hashes = compute_image_fingerprints(parsed.image_urls, settings)
@@ -227,9 +236,9 @@ def process_result(
                 "current_version": 1,
                 "is_deleted": False,
                 "deleted_at": None,
-                "last_keyword": keyword,
+                "last_keyword": primary_keyword,
             })
-            db.create_version(version_payload(article["id"], 1, keyword, parsed, image_urls, image_hashes))
+            db.create_version(version_payload(article["id"], 1, primary_keyword, parsed, image_urls, image_hashes))
             print(f"  [NEW] v1 저장: {(effective_title or '')[:50]}")
         except Exception as exc:
             print(f"  [ERROR] 신규 저장 실패: {url} → {exc}")
@@ -241,13 +250,13 @@ def process_result(
         # 버전 데이터 없으면 v1으로 저장
         try:
             db.create_version(
-                version_payload(existing["id"], 1, keyword, parsed, image_urls, image_hashes)
+                version_payload(existing["id"], 1, primary_keyword, parsed, image_urls, image_hashes)
             )
             db.update_article(existing["id"], {
                 "url": parsed.url,
                 "press": parsed.press or existing.get("press"),
                 "last_seen_at": now,
-                "last_keyword": keyword,
+                "last_keyword": primary_keyword,
                 "is_deleted": False,
                 "deleted_at": None,
             })
@@ -280,7 +289,7 @@ def process_result(
         "url": parsed.url,
         "press": parsed.press or existing.get("press"),
         "last_seen_at": now,
-        "last_keyword": keyword,
+        "last_keyword": primary_keyword,
         "is_deleted": False,
         "deleted_at": None,
     }
@@ -289,7 +298,7 @@ def process_result(
         next_version = int(existing["current_version"]) + 1
         try:
             db.create_version(
-                version_payload(existing["id"], next_version, keyword, parsed, image_urls, image_hashes)
+                version_payload(existing["id"], next_version, primary_keyword, parsed, image_urls, image_hashes)
             )
         except Exception as exc:
             print(f"  [ERROR] 버전 저장 실패: {url} → {exc}")
@@ -366,14 +375,14 @@ def run_discovery(
                     already_tracked += 1
                     if should_recheck_article(existing):
                         normalized_url = process_result(
-                            db, keyword, result.url, result.press, result.title, settings
+                            db, keyword, all_keywords, result.url, result.press, result.title, settings
                         )
                         if normalized_url:
                             processed += 1
                     continue
 
                 normalized_url = process_result(
-                    db, keyword, result.url, result.press, result.title, settings
+                    db, keyword, all_keywords, result.url, result.press, result.title, settings
                 )
                 if normalized_url:
                     processed_urls.add(normalized_url)
@@ -390,6 +399,7 @@ def run_discovery(
 def run_recheck(
     db: NewsTrackerDB,
     fallback_keyword: str,
+    all_keywords: list[str],
     settings,
     processed_urls: set[str],
 ) -> int:
@@ -419,6 +429,7 @@ def run_recheck(
             normalized_url = process_result(
                 db,
                 article.get("last_keyword") or fallback_keyword,
+                all_keywords,
                 article["url"],
                 article.get("press"),
                 None,
@@ -488,7 +499,7 @@ def main() -> None:
             discovered, skipped = run_discovery(db, keywords, all_keywords, settings, processed_urls)
 
         if mode in {"both", "recheck"}:
-            rechecked = run_recheck(db, fallback_keyword, settings, processed_urls)
+            rechecked = run_recheck(db, fallback_keyword, all_keywords, settings, processed_urls)
 
         db.finish_crawler_run(run_log_id, {
             "status": "success",

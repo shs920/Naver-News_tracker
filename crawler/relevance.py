@@ -120,6 +120,46 @@ def compute_relevance(
     return (score, is_relevant)
 
 
+def select_primary_keyword(
+    keywords: list[str],
+    preferred_keyword: str,
+    title: str | None,
+    content_plain: str | None,
+) -> str:
+    candidates: list[tuple[int, int, str]] = []
+    for keyword in keywords:
+        score, is_relevant = compute_relevance(keyword, title, content_plain)
+        if not is_relevant:
+            continue
+        focus_score = score + _keyword_focus_score(keyword, title, content_plain)
+        preferred_rank = 1 if keyword == preferred_keyword else 0
+        candidates.append((focus_score, preferred_rank, keyword))
+
+    if not candidates:
+        return preferred_keyword
+
+    candidates.sort(key=lambda item: (item[0], item[1], item[2]), reverse=True)
+    return candidates[0][2]
+
+
+def _keyword_focus_score(keyword: str, title: str | None, content_plain: str | None) -> int:
+    rule = COMPANY_RULES.get(keyword, {})
+    title_fold = (title or "").casefold()
+    body_fold = (content_plain or "").casefold()
+    aliases = [str(alias) for alias in rule.get("aliases", [])] or [keyword]
+
+    score = 0
+    for alias in aliases:
+        alias_fold = alias.casefold()
+        if not alias_fold:
+            continue
+        if alias_fold in title_fold:
+            score += 25
+        body_count = body_fold.count(alias_fold)
+        score += min(body_count, 5) * 3
+    return score
+
+
 def _is_ambiguous_keyword(keyword: str) -> bool:
     return keyword in AMBIGUOUS_COMPANY_KEYWORDS
 
