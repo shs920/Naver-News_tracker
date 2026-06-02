@@ -11,6 +11,34 @@ from __future__ import annotations
 
 from company_rules import COMPANY_RULES, MIN_RELEVANCE_SCORE
 
+AMBIGUOUS_COMPANY_KEYWORDS = {
+    "오뚜기",
+    "농심",
+    "대상",
+    "하림",
+    "해태",
+    "오리온",
+    "hy",
+}
+
+AMBIGUOUS_NEGATIVE_CONTEXTS = (
+    "프로야구", "야구", "축구", "농구", "배구", "골프", "스포츠",
+    "선수", "감독", "코치", "구단", "경기", "시즌", "리그", "홈런",
+    "타율", "마운드", "승리", "패배", "KBO", "LCK", "e스포츠",
+    "E스포츠", "게임단", "롤드컵", "LoL", "리그 오브 레전드",
+    "가수 하림", "싱어송라이터 하림", "방송인 하림", "연예인 하림",
+    "오뚝이", "오뚝하다", "뚝심", "넘어져도", "일어서는",
+    "대상자", "지원대상", "수상대상", "조사대상", "모집대상",
+)
+
+BUSINESS_CONTEXTS = (
+    "식품", "라면", "과자", "제과", "음료", "유통", "제품", "브랜드",
+    "기업", "그룹", "계열사", "대표", "회장", "사장", "경영", "사업",
+    "매출", "영업이익", "실적", "주가", "증권", "투자", "공장",
+    "생산", "출시", "판매", "시장", "점유율", "프랜차이즈", "외식",
+    "식음료", "소비자", "가격", "인상", "원가", "수출", "해외사업",
+)
+
 
 def compute_relevance(
     keyword: str,
@@ -76,6 +104,12 @@ def compute_relevance(
     if body_only_alias and not _has_near_context(body_text, aliases, contexts):
         return (score, False)
 
+    if _is_ambiguous_keyword(keyword):
+        if _has_negative_ambiguous_context(full_text):
+            return (score, False)
+        if not _has_near_context(full_text, aliases, contexts + list(BUSINESS_CONTEXTS)):
+            return (score, False)
+
     if alias_only_pass and alias_found and score >= 0:
         # exclude에 안 걸렸고 alias가 발견됐으면 통과
         is_relevant = score >= MIN_RELEVANCE_SCORE
@@ -84,6 +118,15 @@ def compute_relevance(
         is_relevant = alias_found and score >= MIN_RELEVANCE_SCORE
 
     return (score, is_relevant)
+
+
+def _is_ambiguous_keyword(keyword: str) -> bool:
+    return keyword in AMBIGUOUS_COMPANY_KEYWORDS
+
+
+def _has_negative_ambiguous_context(text: str) -> bool:
+    text_fold = (text or "").casefold()
+    return any(token.casefold() in text_fold for token in AMBIGUOUS_NEGATIVE_CONTEXTS)
 
 
 def _has_near_context(text: str, aliases: list[str], contexts: list[str], window: int = 180) -> bool:
