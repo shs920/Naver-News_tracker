@@ -470,7 +470,7 @@ def main() -> None:
         })
 
         db.ensure_keywords(settings.seed_keywords)
-        db.deactivate_keywords(settings.discovery_excluded_keywords)
+        db.deactivate_keywords(settings.discovery_excluded_keywords + settings.retired_keywords)
         all_keywords = db.get_active_keywords()
 
         if not all_keywords:

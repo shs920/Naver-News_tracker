@@ -144,6 +144,10 @@ export default function HomePage() {
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
 
+  const scrollToTop = useCallback((behavior: ScrollBehavior = "smooth") => {
+    window.scrollTo({ top: 0, behavior });
+  }, []);
+
   // keywords 테이블에서 동적으로 로드
   useEffect(() => {
     supabase
@@ -270,6 +274,10 @@ export default function HomePage() {
   }, [page, keyword, fetchChanges]);
 
   useEffect(() => {
+    scrollToTop("smooth");
+  }, [page, keyword, scrollToTop]);
+
+  useEffect(() => {
     fetchCrawlerRuns();
     const t = setInterval(() => {
       fetchChanges(page, keyword);
@@ -390,6 +398,31 @@ export default function HomePage() {
           </button>
         </div>
       )}
+
+      <button
+        type="button"
+        aria-label="페이지 상단으로 이동"
+        onClick={() => scrollToTop("smooth")}
+        style={{
+          position: "fixed",
+          right: 24,
+          bottom: 24,
+          zIndex: 50,
+          width: 54,
+          height: 42,
+          borderRadius: 8,
+          border: "1px solid #c8d2e1",
+          background: "#111827",
+          color: "#fff",
+          fontSize: 12,
+          fontWeight: 700,
+          letterSpacing: 0,
+          cursor: "pointer",
+          boxShadow: "0 8px 24px rgba(15, 23, 42, 0.18)",
+        }}
+      >
+        TOP
+      </button>
     </div>
   );
 }
