@@ -1,7 +1,11 @@
 import os
 from dataclasses import dataclass
 
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except ModuleNotFoundError:
+    def load_dotenv() -> None:
+        return None
 
 load_dotenv()
 
@@ -21,8 +25,10 @@ class Settings:
     naver_client_id: str
     naver_client_secret: str
     request_timeout: float = 10.0
-    max_results_per_keyword: int = 100
-    max_search_pages: int = 1
+    max_results_per_keyword: int = 300
+    max_search_pages: int = 3
+    naver_html_search_enabled: bool = True
+    max_html_search_pages: int = 3
     max_recheck_articles: int = 80
     recheck_candidate_pool: int = 800
     max_keywords_per_run: int = 0
@@ -71,8 +77,10 @@ def get_settings() -> Settings:
         naver_client_id=naver_client_id,
         naver_client_secret=naver_client_secret,
         request_timeout=float(os.environ.get("REQUEST_TIMEOUT", "10")),
-        max_results_per_keyword=int(os.environ.get("MAX_RESULTS_PER_KEYWORD", "100")),
-        max_search_pages=int(os.environ.get("MAX_SEARCH_PAGES", "1")),
+        max_results_per_keyword=int(os.environ.get("MAX_RESULTS_PER_KEYWORD", "300")),
+        max_search_pages=int(os.environ.get("MAX_SEARCH_PAGES", "3")),
+        naver_html_search_enabled=env_bool("NAVER_HTML_SEARCH_ENABLED", True),
+        max_html_search_pages=int(os.environ.get("MAX_HTML_SEARCH_PAGES", "3")),
         max_recheck_articles=int(os.environ.get("MAX_RECHECK_ARTICLES", "80")),
         recheck_candidate_pool=int(os.environ.get("RECHECK_CANDIDATE_POOL", "800")),
         max_keywords_per_run=int(os.environ.get("MAX_KEYWORDS_PER_RUN", "0")),

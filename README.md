@@ -54,8 +54,10 @@ GitHub Actions Secrets 또는 로컬 `.env`에 설정합니다.
 | `SUPABASE_URL` | 예 | Supabase Project URL |
 | `SUPABASE_KEY` | 예 | Supabase `service_role` key. GitHub Secrets에만 저장하세요. |
 | `REQUEST_TIMEOUT` | 아니오 | HTTP 요청 타임아웃 초. 기본값 `10` |
-| `MAX_RESULTS_PER_KEYWORD` | 아니오 | 키워드별 네이버 뉴스 검색 결과 조회 개수. 기본값 `100` |
-| `MAX_SEARCH_PAGES` | 아니오 | 네이버 뉴스 API 페이지 조회 수. 100건을 넘겨 조회하려면 `MAX_RESULTS_PER_KEYWORD`와 함께 늘립니다. 기본값 `1` |
+| `MAX_RESULTS_PER_KEYWORD` | 아니오 | 키워드별 네이버 뉴스 API 조회 개수. 기본값 `300` |
+| `MAX_SEARCH_PAGES` | 아니오 | 네이버 뉴스 API 페이지 조회 수. 기본값 `3` |
+| `NAVER_HTML_SEARCH_ENABLED` | 아니오 | 실제 네이버 뉴스 탭 HTML 결과를 API 결과와 병합할지 여부. 기본값 `true` |
+| `MAX_HTML_SEARCH_PAGES` | 아니오 | 네이버 뉴스 탭 HTML 보조 조회 페이지 수. 기본값 `3` |
 | `MAX_RECHECK_ARTICLES` | 아니오 | 기존 추적 기사 재확인 개수. 기본값 `80` |
 | `RECHECK_CANDIDATE_POOL` | 아니오 | 재확인 후보 풀 크기. 최근 기사와 오래 미확인 기사에서 후보를 뽑습니다. 기본값 `800` |
 | `CRAWLER_MODE` | 아니오 | `both`, `discover`, `recheck` 중 하나. GitHub Actions에서는 신규 기사 탐색과 기존 기사 재확인을 별도 job으로 실행합니다. 기본값 `both` |

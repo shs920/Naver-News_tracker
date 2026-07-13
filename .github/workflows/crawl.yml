@@ -8,16 +8,17 @@ on:
     types: [crawl-news]
 
 env:
-  SEED_KEYWORDS: "빙그레,삼양식품,농심,CJ제일제당,오뚜기,오리온,롯데웰푸드,롯데칠성,대상,동원F&B,매일유업,남양유업,서울우유,하림,삼립,해태,hy,하이트진로,오비맥주,BBQ,BHC,교촌,스타벅스"
-  DISCOVERY_EXCLUDED_KEYWORDS: "대상웰라이프"
+  SEED_KEYWORDS: "빙그레,삼양식품,농심,CJ제일제당,오뚜기,오리온,롯데웰푸드,롯데칠성,대상,동원F&B,매일유업,남양유업,서울우유,하림,삼립,해태,hy,하이트진로,오비맥주,스타벅스,아워홈"
+  DISCOVERY_EXCLUDED_KEYWORDS: "대상웰라이프,BBQ,BHC,교촌"
+  RETIRED_KEYWORDS: "BBQ,BHC,교촌"
   PREFILTER_SEARCH_RESULTS: "false"
-  REQUEST_TIMEOUT: "10"
+  REQUEST_TIMEOUT: "15"
 
 jobs:
   discover:
     name: discover-${{ matrix.group }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     concurrency:
       group: news-crawler-discover-${{ matrix.group }}
       cancel-in-progress: false
@@ -51,13 +52,16 @@ jobs:
           KEYWORD_GROUP_INDEX: ${{ matrix.group }}
           KEYWORD_GROUP_COUNT: "8"
           MAX_KEYWORDS_PER_RUN: "0"
-          MAX_RESULTS_PER_KEYWORD: "100"
+          MAX_RESULTS_PER_KEYWORD: "300"
+          MAX_SEARCH_PAGES: "3"
+          NAVER_HTML_SEARCH_ENABLED: "true"
+          MAX_HTML_SEARCH_PAGES: "3"
         run: python crawler/main.py
 
   recheck:
     name: recheck-${{ matrix.group }}
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 15
     concurrency:
       group: news-crawler-recheck-${{ matrix.group }}
       cancel-in-progress: false
