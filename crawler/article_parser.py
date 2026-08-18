@@ -144,10 +144,16 @@ def fetch_article(url: str, fallback_press: str | None, settings: Settings) -> P
     final_url = str(response.url)
     html = response.text or ""
 
-    if _is_deleted_response(response.status_code, html, url, final_url):
-        return _deleted(url, normalized_url, fallback_press, final_url, response.status_code)
     if response.status_code == 403:
         print(f"  [SKIP] forbidden response, not marking deleted: {url}")
+        return _failed(url, normalized_url, fallback_press, final_url, response.status_code)
+    if response.status_code >= 500:
+        print(f"  [SKIP] server error response, not marking deleted: {url} status={response.status_code}")
+        return _failed(url, normalized_url, fallback_press, final_url, response.status_code)
+    if _is_deleted_status(response.status_code, html):
+        return _deleted(url, normalized_url, fallback_press, final_url, response.status_code)
+    if response.status_code >= 400:
+        print(f"  [SKIP] client error response, not marking deleted without delete marker: {url} status={response.status_code}")
         return _failed(url, normalized_url, fallback_press, final_url, response.status_code)
     if is_non_article_url(final_url):
         print(f"  [SKIP] redirect landed on non-article URL: {final_url}")
@@ -158,6 +164,13 @@ def fetch_article(url: str, fallback_press: str | None, settings: Settings) -> P
     press = _extract_press(soup) or fallback_press
     content_html, parse_quality = _extract_content(soup, html, press, title)
     content_plain = _clean_article_plain(_html_to_plain(content_html))
+
+    if _has_deleted_pattern(html) and (
+        parse_quality == "failed"
+        or not content_plain
+        or len(content_plain) < MIN_CONTENT_LENGTH
+    ):
+        return _deleted(url, normalized_url, fallback_press, final_url, response.status_code)
 
     if _is_low_quality_content(content_plain, final_url):
         print(f"  [SKIP-QUALITY] low quality article body: {url}")
@@ -228,13 +241,17 @@ def _failed(
     )
 
 
-def _is_deleted_response(status_code: int, html: str, original_url: str, final_url: str) -> bool:
-    if status_code in {404, 410}:
+def _is_deleted_status(status_code: int, html: str) -> bool:
+    if status_code == 410:
         return True
-    plain = BeautifulSoup(html, "html.parser").get_text(" ", strip=True)
-    if any(pattern in plain for pattern in DELETED_PATTERNS):
+    if status_code == 404 and _has_deleted_pattern(html):
         return True
     return False
+
+
+def _has_deleted_pattern(html: str) -> bool:
+    plain = BeautifulSoup(html, "html.parser").get_text(" ", strip=True)
+    return any(pattern in plain for pattern in DELETED_PATTERNS)
 
 
 def _extract_content(
