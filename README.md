@@ -113,12 +113,15 @@ DIAG_KEYWORDS="빙그레,스타벅스" python scripts/diagnose_missing_articles.
 [.github/workflows/crawl.yml](.github/workflows/crawl.yml)은 다음 흐름으로 동작합니다.
 
 1. 5분마다 실행
-2. 신규 기사 탐색(`CRAWLER_MODE=discover`)과 기존 기사 재확인(`CRAWLER_MODE=recheck`)을 별도 병렬 job으로 실행
-3. 신규 기사 탐색은 8개 그룹, 기존 기사 재확인은 4개 그룹으로 나뉘어 키워드와 기사 후보를 분산 처리
-4. Python 3.11 설치
-5. `crawler/requirements.txt` 설치
-6. `python crawler/main.py` 실행
-7. 각 job의 시작, 성공, 실패 상태를 Supabase `crawler_runs` 테이블에 기록
+2. `preflight` job에서 Supabase REST API와 Naver Search API 연결을 먼저 확인
+3. 신규 기사 탐색(`CRAWLER_MODE=discover`)과 기존 기사 재확인(`CRAWLER_MODE=recheck`)을 별도 병렬 job으로 실행
+4. 신규 기사 탐색은 8개 그룹, 기존 기사 재확인은 4개 그룹으로 나뉘어 키워드와 기사 후보를 분산 처리
+5. Python 3.11 설치
+6. `crawler/requirements.txt` 설치
+7. `python crawler/main.py` 실행
+8. 각 job의 시작, 성공, 실패 상태를 Supabase `crawler_runs` 테이블에 기록
+
+워크플로에는 전체 `concurrency`가 설정되어 있습니다. 5분 주기 실행이 이전 실행과 겹칠 때 GitHub Actions 큐가 무한히 쌓이지 않도록 한 번에 하나의 워크플로만 실행하고, 새 실행은 대기 상태로 관리합니다.
 
 GitHub 저장소의 `Settings > Secrets and variables > Actions`에 아래 Secrets를 추가합니다.
 
@@ -130,6 +133,14 @@ GitHub 저장소의 `Settings > Secrets and variables > Actions`에 아래 Secre
 | `NAVER_CLIENT_SECRET` | Naver Search API Client Secret |
 
 수동 실행은 GitHub Actions 화면에서 `Crawl news changes` 워크플로를 선택한 뒤 `Run workflow`를 누르면 됩니다.
+
+실행이 실패하면 먼저 `preflight` job 로그를 확인하세요.
+
+- `SUPABASE_URL is empty or missing` 또는 `SUPABASE_KEY is empty or missing`: GitHub Actions Secrets 값이 비어 있거나 이름이 다릅니다.
+- `Supabase REST check failed`: Supabase URL/key가 틀렸거나 Supabase 서비스가 아직 정상 복구되지 않은 상태입니다.
+- `NAVER_CLIENT_ID is empty or missing` 또는 `NAVER_CLIENT_SECRET is empty or missing`: Naver API Secrets가 누락됐습니다.
+- `Naver Search API check failed`: Naver API 키 권한, 일일 한도, 또는 API 서비스 상태를 확인해야 합니다.
+- `preflight`는 통과했지만 `discover-*` 또는 `recheck-*`가 실패하면 해당 job의 `Run python crawler/main.py` 로그에서 기사 URL별 오류 또는 timeout을 확인합니다.
 
 워크플로는 `repository_dispatch` 이벤트도 지원합니다. 외부 감시 시스템에서 `crawl-news` 이벤트 또는 `workflow_dispatch` API를 호출하면 GitHub Actions 스케줄이 지연될 때도 크롤러를 다시 깨울 수 있습니다.
 

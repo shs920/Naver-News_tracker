@@ -7,6 +7,10 @@ on:
   repository_dispatch:
     types: [crawl-news]
 
+concurrency:
+  group: news-crawler-${{ github.ref }}
+  cancel-in-progress: false
+
 env:
   SEED_KEYWORDS: "빙그레,삼양식품,농심,CJ제일제당,오뚜기,오리온,롯데웰푸드,롯데칠성,대상,동원F&B,매일유업,남양유업,서울우유,하림,삼립,해태,hy,하이트진로,오비맥주,스타벅스,아워홈"
   DISCOVERY_EXCLUDED_KEYWORDS: "대상웰라이프,BBQ,BHC,교촌"
@@ -15,8 +19,36 @@ env:
   REQUEST_TIMEOUT: "15"
 
 jobs:
+  preflight:
+    name: preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+          cache-dependency-path: crawler/requirements.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r crawler/requirements.txt
+
+      - name: Check external services
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          NAVER_CLIENT_ID: ${{ secrets.NAVER_CLIENT_ID }}
+          NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
+        run: python crawler/preflight.py
+
   discover:
     name: discover-${{ matrix.group }}
+    needs: preflight
     runs-on: ubuntu-latest
     timeout-minutes: 25
     concurrency:
@@ -24,7 +56,7 @@ jobs:
       cancel-in-progress: false
     strategy:
       fail-fast: false
-      max-parallel: 8
+      max-parallel: 4
       matrix:
         group: [0, 1, 2, 3, 4, 5, 6, 7]
 
@@ -60,6 +92,7 @@ jobs:
 
   recheck:
     name: recheck-${{ matrix.group }}
+    needs: preflight
     runs-on: ubuntu-latest
     timeout-minutes: 15
     concurrency:
@@ -67,7 +100,7 @@ jobs:
       cancel-in-progress: false
     strategy:
       fail-fast: false
-      max-parallel: 4
+      max-parallel: 2
       matrix:
         group: [0, 1, 2, 3]
 
