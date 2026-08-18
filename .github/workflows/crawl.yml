@@ -7,10 +7,6 @@ on:
   repository_dispatch:
     types: [crawl-news]
 
-concurrency:
-  group: news-crawler-${{ github.ref }}
-  cancel-in-progress: false
-
 env:
   SEED_KEYWORDS: "빙그레,삼양식품,농심,CJ제일제당,오뚜기,오리온,롯데웰푸드,롯데칠성,대상,동원F&B,매일유업,남양유업,서울우유,하림,삼립,해태,hy,하이트진로,오비맥주,스타벅스,아워홈"
   DISCOVERY_EXCLUDED_KEYWORDS: "대상웰라이프,BBQ,BHC,교촌"
@@ -84,10 +80,10 @@ jobs:
           KEYWORD_GROUP_INDEX: ${{ matrix.group }}
           KEYWORD_GROUP_COUNT: "8"
           MAX_KEYWORDS_PER_RUN: "0"
-          MAX_RESULTS_PER_KEYWORD: "300"
-          MAX_SEARCH_PAGES: "3"
+          MAX_RESULTS_PER_KEYWORD: "150"
+          MAX_SEARCH_PAGES: "2"
           NAVER_HTML_SEARCH_ENABLED: "true"
-          MAX_HTML_SEARCH_PAGES: "3"
+          MAX_HTML_SEARCH_PAGES: "2"
         run: python crawler/main.py
 
   recheck:

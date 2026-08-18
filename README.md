@@ -54,8 +54,8 @@ GitHub Actions Secrets 또는 로컬 `.env`에 설정합니다.
 | `SUPABASE_URL` | 예 | Supabase Project URL |
 | `SUPABASE_KEY` | 예 | Supabase `service_role` key. GitHub Secrets에만 저장하세요. |
 | `REQUEST_TIMEOUT` | 아니오 | HTTP 요청 타임아웃 초. 기본값 `10` |
-| `MAX_RESULTS_PER_KEYWORD` | 아니오 | 키워드별 네이버 뉴스 API 조회 개수. 기본값 `300` |
-| `MAX_SEARCH_PAGES` | 아니오 | 네이버 뉴스 API 페이지 조회 수. 기본값 `3` |
+| `MAX_RESULTS_PER_KEYWORD` | 아니오 | 키워드별 네이버 뉴스 API 조회 개수. 기본값 `300`. GitHub Actions 운영값은 안정성을 위해 `150` |
+| `MAX_SEARCH_PAGES` | 아니오 | 네이버 뉴스 API 페이지 조회 수. 기본값 `3`. GitHub Actions 운영값은 안정성을 위해 `2` |
 | `NAVER_HTML_SEARCH_ENABLED` | 아니오 | 실제 네이버 뉴스 탭 HTML 결과를 API 결과와 병합할지 여부. 기본값 `true` |
 | `MAX_HTML_SEARCH_PAGES` | 아니오 | 네이버 뉴스 탭 HTML 보조 조회 페이지 수. 기본값 `3` |
 | `MAX_RECHECK_ARTICLES` | 아니오 | 기존 추적 기사 재확인 개수. 기본값 `80` |
@@ -121,7 +121,7 @@ DIAG_KEYWORDS="빙그레,스타벅스" python scripts/diagnose_missing_articles.
 7. `python crawler/main.py` 실행
 8. 각 job의 시작, 성공, 실패 상태를 Supabase `crawler_runs` 테이블에 기록
 
-워크플로에는 전체 `concurrency`가 설정되어 있습니다. 5분 주기 실행이 이전 실행과 겹칠 때 GitHub Actions 큐가 무한히 쌓이지 않도록 한 번에 하나의 워크플로만 실행하고, 새 실행은 대기 상태로 관리합니다.
+워크플로 전체에는 `concurrency`를 걸지 않습니다. 전체 실행을 직렬화하면 수동 실행이나 오래 걸린 실행 하나 때문에 다음 정기 실행이 `Pending`으로 밀릴 수 있기 때문입니다. 대신 `discover-*`, `recheck-*` job 단위로만 중복 실행을 막아 같은 그룹이 동시에 같은 기사를 처리하지 않도록 합니다.
 
 GitHub 저장소의 `Settings > Secrets and variables > Actions`에 아래 Secrets를 추가합니다.
 
@@ -247,7 +247,7 @@ npm run build
 
 - `crawler/main.py`는 GitHub Actions에서 실행되도록 workflow와 requirements가 연결되어 있습니다.
 - `crawler/requirements.txt`에는 `readability-lxml` 실행에 필요한 `lxml`을 명시했습니다.
-- GitHub Actions는 5분마다 실행되며, 신규 기사 탐색 8개 job과 기존 기사 재확인 4개 job으로 작업을 나누어 처리합니다. 원문 fetch 전 제목/요약 사전 필터는 기본 비활성화되어 검색 결과 누락을 줄이고, 원문을 파싱한 뒤 본문 기준으로 관련성을 판단합니다.
+- GitHub Actions는 5분마다 실행되며, 신규 기사 탐색 8개 job과 기존 기사 재확인 4개 job으로 작업을 나누어 처리합니다. 신규 기사 탐색은 운영 안정성을 위해 키워드별 API 150건, HTML 보조 2페이지를 조회합니다. 원문 fetch 전 제목/요약 사전 필터는 기본 비활성화되어 검색 결과 누락을 줄이고, 원문을 파싱한 뒤 본문 기준으로 관련성을 판단합니다.
 - 본문 비교는 문단 정렬 기반으로 처리해 중간 문단 삽입 시 뒤 문단 전체가 수정된 것처럼 보이는 현상을 줄입니다.
 - 웹 메인 페이지는 최근 변경 목록, 변경 유형, 언론사, 변경 시각, 버전 번호를 표시합니다.
 - 웹 상세 페이지는 제목, 본문, 사진을 좌우 비교하고 변경 단어만 강조 표시합니다.
