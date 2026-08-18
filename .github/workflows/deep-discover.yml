@@ -82,4 +82,7 @@ jobs:
           MAX_SEARCH_PAGES: "2"
           NAVER_HTML_SEARCH_ENABLED: "true"
           MAX_HTML_SEARCH_PAGES: "2"
+          DISCOVERY_RECHECK_EXISTING: "false"
+          MAX_RUN_SECONDS: "900"
+          MAX_NEW_ARTICLES_PER_KEYWORD: "0"
         run: python crawler/main.py

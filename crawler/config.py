@@ -36,6 +36,9 @@ class Settings:
     keyword_group_count: int = 1
     crawler_mode: str = "both"
     prefilter_search_results: bool = False
+    discovery_recheck_existing: bool = False
+    max_run_seconds: int = 0
+    max_new_articles_per_keyword: int = 0
     seed_keywords: tuple[str, ...] = ()
     discovery_excluded_keywords: tuple[str, ...] = ()
     retired_keywords: tuple[str, ...] = ()
@@ -88,6 +91,9 @@ def get_settings() -> Settings:
         keyword_group_count=max(1, int(os.environ.get("KEYWORD_GROUP_COUNT", "1"))),
         crawler_mode=os.environ.get("CRAWLER_MODE", "both").strip().lower(),
         prefilter_search_results=env_bool("PREFILTER_SEARCH_RESULTS", False),
+        discovery_recheck_existing=env_bool("DISCOVERY_RECHECK_EXISTING", False),
+        max_run_seconds=int(os.environ.get("MAX_RUN_SECONDS", "0")),
+        max_new_articles_per_keyword=int(os.environ.get("MAX_NEW_ARTICLES_PER_KEYWORD", "0")),
         seed_keywords=tuple(
             keyword.strip()
             for keyword in os.environ.get("SEED_KEYWORDS", DEFAULT_SEED_KEYWORDS).split(",")

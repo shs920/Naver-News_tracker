@@ -9,6 +9,7 @@
 from __future__ import annotations
 
 import os
+import time
 from datetime import datetime, timezone
 from typing import Any
 
@@ -353,12 +354,34 @@ def run_discovery(
     processed = 0
     skipped = 0
     already_tracked = 0
+    deadline = time.monotonic() + settings.max_run_seconds if settings.max_run_seconds > 0 else None
+    timed_out = False
 
     for keyword in keywords:
+        if deadline is not None and time.monotonic() >= deadline:
+            timed_out = True
+            print(f"[DISCOVER-BUDGET] time budget reached before keyword={keyword}")
+            break
+
         results = search_naver_news(keyword, settings)
         print(f"\n[{keyword}] search results: {len(results)}")
+        new_for_keyword = 0
 
         for result in results:
+            if deadline is not None and time.monotonic() >= deadline:
+                timed_out = True
+                print(f"  [DISCOVER-BUDGET] time budget reached during keyword={keyword}")
+                break
+            if (
+                settings.max_new_articles_per_keyword > 0
+                and new_for_keyword >= settings.max_new_articles_per_keyword
+            ):
+                print(
+                    f"  [DISCOVER-LIMIT] keyword={keyword}, "
+                    f"new_limit={settings.max_new_articles_per_keyword}"
+                )
+                break
+
             try:
                 if settings.prefilter_search_results and not filter_by_relevance(
                     keyword,
@@ -373,7 +396,7 @@ def run_discovery(
                 if existing:
                     processed_urls.add(quick_normalized_url)
                     already_tracked += 1
-                    if should_recheck_article(existing):
+                    if settings.discovery_recheck_existing and should_recheck_article(existing):
                         normalized_url = process_result(
                             db, keyword, all_keywords, result.url, result.press, result.title, settings
                         )
@@ -387,12 +410,16 @@ def run_discovery(
                 if normalized_url:
                     processed_urls.add(normalized_url)
                     processed += 1
+                    new_for_keyword += 1
                 else:
                     skipped += 1
             except Exception as exc:
                 print(f"  [ERROR] {result.url}: {exc}")
 
-    print(f"DISCOVER already_tracked_skipped={already_tracked}")
+        if timed_out:
+            break
+
+    print(f"DISCOVER already_tracked_skipped={already_tracked}, timed_out={timed_out}")
     return processed, skipped
 
 
