@@ -54,7 +54,7 @@ jobs:
       fail-fast: false
       max-parallel: 4
       matrix:
-        group: [0, 1, 2, 3, 4, 5, 6, 7]
+        group: [0, 1, 2, 3]
 
     steps:
       - name: Checkout
@@ -78,7 +78,7 @@ jobs:
           NAVER_CLIENT_SECRET: ${{ secrets.NAVER_CLIENT_SECRET }}
           CRAWLER_MODE: "discover"
           KEYWORD_GROUP_INDEX: ${{ matrix.group }}
-          KEYWORD_GROUP_COUNT: "8"
+          KEYWORD_GROUP_COUNT: "4"
           MAX_KEYWORDS_PER_RUN: "0"
           MAX_RESULTS_PER_KEYWORD: "50"
           MAX_SEARCH_PAGES: "1"
@@ -87,6 +87,7 @@ jobs:
           DISCOVERY_RECHECK_EXISTING: "false"
           MAX_RUN_SECONDS: "150"
           MAX_NEW_ARTICLES_PER_KEYWORD: "8"
+          MAX_IMAGES_PER_ARTICLE: "3"
         run: python crawler/main.py
 
   recheck:
@@ -129,6 +130,7 @@ jobs:
           MAX_RECHECK_ARTICLES: "80"
           RECHECK_CANDIDATE_POOL: "1200"
           MAX_RUN_SECONDS: "360"
+          MAX_IMAGES_PER_ARTICLE: "4"
         run: |
           sleep $(( ${{ matrix.group }} * 45 ))
           python crawler/main.py

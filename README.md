@@ -69,6 +69,7 @@ GitHub Actions Secrets 또는 로컬 `.env`에 설정합니다.
 | `DISCOVERY_RECHECK_EXISTING` | 아니오 | 신규 탐색 중 이미 저장된 기사를 다시 원문 확인할지 여부. 기본값 `false`. 기존 기사 수정 확인은 `recheck` job이 담당합니다. |
 | `MAX_RUN_SECONDS` | 아니오 | 크롤러 본체의 최대 실행 시간. `0`이면 제한 없음. 5분 주기 신규 탐색 운영값은 `150` |
 | `MAX_NEW_ARTICLES_PER_KEYWORD` | 아니오 | 신규 탐색에서 키워드별로 원문 파싱까지 진행할 신규 후보 수. `0`이면 제한 없음. 5분 주기 신규 탐색 운영값은 `8` |
+| `MAX_IMAGES_PER_ARTICLE` | 아니오 | 기사 1건에서 pHash 계산 대상으로 삼을 최대 이미지 수. `0`이면 제한 없음. 빠른 신규 탐색 운영값은 `3`, 재확인/깊은 탐색 운영값은 `4` |
 | `SEED_KEYWORDS` | 아니오 | 실행 시작 시 누락된 키워드를 자동 등록할 쉼표 구분 목록. 기본값에 `삼립`, `스타벅스` 포함 |
 
 ## 크롤러 로컬 실행
@@ -118,7 +119,7 @@ DIAG_KEYWORDS="빙그레,스타벅스" python scripts/diagnose_missing_articles.
 1. 5분마다 실행
 2. `preflight` job에서 Supabase REST API와 Naver Search API 연결을 먼저 확인
 3. 신규 기사 탐색(`CRAWLER_MODE=discover`)과 기존 기사 재확인(`CRAWLER_MODE=recheck`)을 별도 병렬 job으로 실행
-4. 신규 기사 탐색은 8개 그룹, 기존 기사 재확인은 4개 그룹으로 나뉘어 키워드와 기사 후보를 분산 처리
+4. 신규 기사 탐색과 기존 기사 재확인은 각각 4개 그룹으로 나뉘어 키워드와 기사 후보를 분산 처리
 5. Python 3.11 설치
 6. `crawler/requirements.txt` 설치
 7. `python crawler/main.py` 실행
@@ -254,7 +255,7 @@ npm run build
 
 - `crawler/main.py`는 GitHub Actions에서 실행되도록 workflow와 requirements가 연결되어 있습니다.
 - `crawler/requirements.txt`에는 `readability-lxml` 실행에 필요한 `lxml`을 명시했습니다.
-- GitHub Actions는 5분마다 실행되며, 신규 기사 탐색 8개 job과 기존 기사 재확인 4개 job으로 작업을 나누어 처리합니다. 빠른 신규 탐색은 키워드별 API 50건, HTML 보조 1페이지를 조회하고, 키워드별 신규 원문 처리 8건과 실행 시간 150초 제한을 둡니다. 30분 주기 깊은 탐색은 API 150건, HTML 보조 2페이지로 누락 후보를 보완합니다. 원문 fetch 전 제목/요약 사전 필터는 기본 비활성화되어 검색 결과 누락을 줄이고, 원문을 파싱한 뒤 본문 기준으로 관련성을 판단합니다.
+- GitHub Actions는 5분마다 실행되며, 신규 기사 탐색 4개 job과 기존 기사 재확인 4개 job으로 작업을 나누어 처리합니다. 빠른 신규 탐색은 키워드별 API 50건, HTML 보조 1페이지를 조회하고, 키워드별 신규 원문 처리 8건과 실행 시간 150초 제한을 둡니다. 30분 주기 깊은 탐색은 API 150건, HTML 보조 2페이지로 누락 후보를 보완합니다. 원문 fetch 전 제목/요약 사전 필터는 기본 비활성화되어 검색 결과 누락을 줄이고, 원문을 파싱한 뒤 본문 기준으로 관련성을 판단합니다.
 - 본문 비교는 문단 정렬 기반으로 처리해 중간 문단 삽입 시 뒤 문단 전체가 수정된 것처럼 보이는 현상을 줄입니다.
 - 웹 메인 페이지는 최근 변경 목록, 변경 유형, 언론사, 변경 시각, 버전 번호를 표시합니다.
 - 웹 상세 페이지는 제목, 본문, 사진을 좌우 비교하고 변경 단어만 강조 표시합니다.

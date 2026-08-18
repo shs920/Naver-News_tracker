@@ -85,4 +85,5 @@ jobs:
           DISCOVERY_RECHECK_EXISTING: "false"
           MAX_RUN_SECONDS: "900"
           MAX_NEW_ARTICLES_PER_KEYWORD: "0"
+          MAX_IMAGES_PER_ARTICLE: "4"
         run: python crawler/main.py

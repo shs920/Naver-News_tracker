@@ -39,6 +39,7 @@ class Settings:
     discovery_recheck_existing: bool = False
     max_run_seconds: int = 0
     max_new_articles_per_keyword: int = 0
+    max_images_per_article: int = 4
     seed_keywords: tuple[str, ...] = ()
     discovery_excluded_keywords: tuple[str, ...] = ()
     retired_keywords: tuple[str, ...] = ()
@@ -94,6 +95,7 @@ def get_settings() -> Settings:
         discovery_recheck_existing=env_bool("DISCOVERY_RECHECK_EXISTING", False),
         max_run_seconds=int(os.environ.get("MAX_RUN_SECONDS", "0")),
         max_new_articles_per_keyword=int(os.environ.get("MAX_NEW_ARTICLES_PER_KEYWORD", "0")),
+        max_images_per_article=int(os.environ.get("MAX_IMAGES_PER_ARTICLE", "4")),
         seed_keywords=tuple(
             keyword.strip()
             for keyword in os.environ.get("SEED_KEYWORDS", DEFAULT_SEED_KEYWORDS).split(",")

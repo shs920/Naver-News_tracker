@@ -219,7 +219,10 @@ def process_result(
         print(f"  [PRIMARY-KEYWORD] {keyword} -> {primary_keyword}: {(effective_title or '')[:50]}")
 
     # ── 5. 이미지 해시 계산 ──────────────────────────────────
-    image_urls, image_hashes = compute_image_fingerprints(parsed.image_urls, settings)
+    candidate_image_urls = parsed.image_urls
+    if settings.max_images_per_article > 0:
+        candidate_image_urls = candidate_image_urls[:settings.max_images_per_article]
+    image_urls, image_hashes = compute_image_fingerprints(candidate_image_urls, settings)
 
     now = utc_now_iso()
     existing = db.get_article_by_normalized_url(parsed.normalized_url)
@@ -366,8 +369,15 @@ def run_discovery(
         results = search_naver_news(keyword, settings)
         print(f"\n[{keyword}] search results: {len(results)}")
         new_for_keyword = 0
+        normalized_results = [
+            (result, normalize_article_url(result.url))
+            for result in results
+        ]
+        existing_by_url = db.get_articles_by_normalized_urls(
+            [normalized_url for _, normalized_url in normalized_results]
+        )
 
-        for result in results:
+        for result, quick_normalized_url in normalized_results:
             if deadline is not None and time.monotonic() >= deadline:
                 timed_out = True
                 print(f"  [DISCOVER-BUDGET] time budget reached during keyword={keyword}")
@@ -391,8 +401,7 @@ def run_discovery(
                     skipped += 1
                     continue
 
-                quick_normalized_url = normalize_article_url(result.url)
-                existing = db.get_article_by_normalized_url(quick_normalized_url)
+                existing = existing_by_url.get(quick_normalized_url)
                 if existing:
                     processed_urls.add(quick_normalized_url)
                     already_tracked += 1
@@ -437,6 +446,8 @@ def run_recheck(
     )
     rechecked = 0
     skipped_not_due = 0
+    deadline = time.monotonic() + settings.max_run_seconds if settings.max_run_seconds > 0 else None
+    timed_out = False
 
     for article in db.list_articles_for_recheck(
         settings.max_recheck_articles,
@@ -444,6 +455,10 @@ def run_recheck(
         settings.keyword_group_count,
         settings.recheck_candidate_pool,
     ):
+        if deadline is not None and time.monotonic() >= deadline:
+            timed_out = True
+            print("[RECHECK-BUDGET] time budget reached")
+            break
         if rechecked >= settings.max_recheck_articles:
             break
         if article["normalized_url"] in processed_urls:
@@ -468,7 +483,7 @@ def run_recheck(
         except Exception as exc:
             print(f"  [RECHECK ERROR] {article['url']}: {exc}")
 
-    print(f"[RECHECK] done={rechecked}, skipped_not_due={skipped_not_due}")
+    print(f"[RECHECK] done={rechecked}, skipped_not_due={skipped_not_due}, timed_out={timed_out}")
     return rechecked
 
 

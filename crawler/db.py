@@ -50,6 +50,31 @@ class NewsTrackerDB:
         )
         return (result.data or [None])[0]
 
+    def get_articles_by_normalized_urls(self, normalized_urls: list[str]) -> dict[str, dict[str, Any]]:
+        unique_urls = list(dict.fromkeys(url for url in normalized_urls if url))
+        if not unique_urls:
+            return {}
+
+        rows: list[dict[str, Any]] = []
+        try:
+            for index in range(0, len(unique_urls), 100):
+                chunk = unique_urls[index:index + 100]
+                result = (
+                    self.client.table("articles")
+                    .select("*")
+                    .in_("normalized_url", chunk)
+                    .execute()
+                )
+                rows.extend(result.data or [])
+        except Exception as exc:
+            print(f"[DB-WARN] batch article lookup failed, falling back to single lookups: {exc}")
+            for url in unique_urls:
+                row = self.get_article_by_normalized_url(url)
+                if row:
+                    rows.append(row)
+
+        return {row["normalized_url"]: row for row in rows if row.get("normalized_url")}
+
     def get_latest_version(self, article_id: str) -> dict[str, Any] | None:
         result = (
             self.client.table("article_versions")
